@@ -195,7 +195,9 @@ fn main() -> Result<()> {
         .filter(|x| x.hash.is_none())
         .collect();
 
-    info!("Running md5sum on {} duplicated files", to_check_hash.len());
+    let file_size_to_hash = to_check_hash.iter().fold(0, |agg, x| agg + x.size);
+
+    info!("Running md5sum on {} duplicated files. Total {} bytes", to_check_hash.len(), file_size_to_hash);
     let mut tx = conn.transaction()?;
     let mut i = 0;
     let mut time = Instant::now();
