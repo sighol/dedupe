@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use tracing::info;
 use walkdir::WalkDir;
 
@@ -89,8 +90,6 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
         }
         map
     };
-
-    info!("Found {} files", map.len());
 
     let mut tx = conn.transaction()?;
     let mut i = 0;
@@ -193,9 +192,10 @@ fn main() -> Result<()> {
 
     let to_check_hash: Vec<FileRecord> = find_duplicates_by(|a, b| a.size.cmp(&b.size), files);
 
-    info!("Running md5sum on duplicates by size");
+    info!("Running md5sum on {} duplicated files", to_check_hash.len());
     let mut tx = conn.transaction()?;
     let mut i = 0;
+    let mut time = Instant::now();
     for file_ref in to_check_hash {
         let file_data = file_ref;
         if file_data.hash.is_some() {
@@ -207,11 +207,12 @@ fn main() -> Result<()> {
                 params![hash, file_data.path],
             )?;
             i += 1;
-            if i >= 5_000 {
+            if i >= 5_000 || time.elapsed() > Duration::from_secs(10) {
                 info!("Updated {} hash values", i);
                 tx.commit()?;
                 tx = conn.transaction()?;
                 i = 0;
+                time = Instant::now();
             }
         }
     }
