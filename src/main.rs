@@ -69,7 +69,7 @@ fn add_folder(
                 )?;
                 i += 1;
 
-                if i >= 500 {
+                if i >= 10_000 {
                     info!("Committing {} items", i);
                     i = 0;
                     tx.commit().unwrap();
@@ -137,7 +137,7 @@ fn main() -> Result<()> {
                 params![hash, file_data.path],
             )?;
             i += 1;
-            if i > 500 {
+            if i >= 5_000 {
                 info!("Updated {} hash values", i);
                 tx.commit()?;
                 tx = conn.transaction()?;
@@ -160,6 +160,7 @@ fn main() -> Result<()> {
         let path: String = row.get(0)?;
         let size: i64 = row.get(1)?;
         let hash: String = row.get(2)?;
+        if size < 1000 { continue }
         if hash != prev {
             println!();
             prev = hash.clone();
