@@ -1,9 +1,22 @@
-use rusqlite::{params, Connection, Result};
+use clap::Parser;
+use rusqlite::{Connection, Result, params};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read};
-use walkdir::WalkDir;
+use std::path::PathBuf;
 use tracing::info;
+use walkdir::WalkDir;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about = "A tool to process multiple folders")]
+struct Args {
+    /// List of folders to process
+    #[arg(value_name = "FOLDER", num_args = 1.., required = true)]
+    folders: Vec<PathBuf>,
+
+    #[arg(short, long)]
+    db: Option<PathBuf>,
+}
 
 #[allow(dead_code)]
 struct FileRecord {
@@ -14,7 +27,9 @@ struct FileRecord {
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    let conn = Connection::open("files.db")?;
+    let args = Args::parse();
+    let path = args.db.unwrap_or(PathBuf::from("files.db"));
+    let conn = Connection::open(&path)?;
 
     // Create the schema
     conn.execute(
@@ -27,26 +42,35 @@ fn main() -> Result<()> {
     )?;
 
     // Step 1: Recursively scan folders
-    let target_dirs = vec!["."]; // Add your paths here
     println!("Scanning folders...");
 
-    let mut stmt = conn.prepare(
-        "select path, size, hash from files"
-    ).expect("select all files");
+    let mut stmt = conn
+        .prepare("select path, size, hash from files")
+        .expect("select all files");
 
-    let existing_files: Vec<FileRecord> = stmt.query_map([], |row| {
-        Ok(FileRecord {
-            path: row.get(0).expect("Should get path"),
-            size: row.get(1).expect("should get size"),
-            hash: row.get(2).ok(),
+    let existing_files: Vec<FileRecord> = stmt
+        .query_map([], |row| {
+            Ok(FileRecord {
+                path: row.get(0).expect("Should get path"),
+                size: row.get(1).expect("should get size"),
+                hash: row.get(2).ok(),
+            })
         })
-    }).unwrap().flatten().collect();
+        .unwrap()
+        .flatten()
+        .collect();
     let mut map = HashMap::new();
     for record in existing_files.into_iter() {
         map.insert(record.path.clone(), record);
     }
 
-    for dir in target_dirs {
+    let folders: Vec<_> = args
+        .folders
+        .iter()
+        .map(|x| x.canonicalize().expect("Canonicalize"))
+        .collect();
+
+    for dir in folders {
         for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
             if entry.file_type().is_file() {
                 let path = entry.path().display().to_string();
@@ -68,7 +92,7 @@ fn main() -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT path, size, hash FROM files WHERE size IN (
             SELECT size FROM files GROUP BY size HAVING COUNT(*) > 1
-        )"
+        )",
     )?;
 
     let candidate_iter = stmt.query_map([], |row| {
@@ -82,7 +106,7 @@ fn main() -> Result<()> {
     for file_ref in candidate_iter {
         let file_data = file_ref?;
         if file_data.hash.is_some() {
-            continue
+            continue;
         }
         if let Ok(hash) = compute_md5(&file_data.path) {
             conn.execute(
@@ -97,7 +121,7 @@ fn main() -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT path, size, hash FROM files WHERE hash IS NOT NULL AND hash IN (
             SELECT hash FROM files WHERE hash IS NOT NULL GROUP BY hash HAVING COUNT(*) > 1
-        ) ORDER BY hash"
+        ) ORDER BY hash",
     )?;
 
     let mut rows = stmt.query([])?;
@@ -124,7 +148,9 @@ fn compute_md5(path: &str) -> io::Result<String> {
 
     loop {
         let count = file.read(&mut buffer)?;
-        if count == 0 { break; }
+        if count == 0 {
+            break;
+        }
         context.consume(&buffer[..count]);
     }
 
