@@ -190,17 +190,17 @@ fn main() -> Result<()> {
         .sorted_by(|a, b| a.size.cmp(&b.size))
         .collect();
 
-    let to_check_hash: Vec<FileRecord> = find_duplicates_by(|a, b| a.size.cmp(&b.size), files);
+    let to_check_hash: Vec<FileRecord> = find_duplicates_by(|a, b| a.size.cmp(&b.size), files)
+        .into_iter()
+        .filter(|x| x.hash.is_none())
+        .collect();
 
     info!("Running md5sum on {} duplicated files", to_check_hash.len());
     let mut tx = conn.transaction()?;
     let mut i = 0;
     let mut time = Instant::now();
-    for file_ref in to_check_hash {
-        let file_data = file_ref;
-        if file_data.hash.is_some() {
-            continue;
-        }
+    for file_data in to_check_hash {
+        assert!(file_data.hash.is_none());
         if let Ok(hash) = compute_md5(&file_data.path) {
             tx.execute(
                 "UPDATE files SET hash = ?1 WHERE path = ?2",
