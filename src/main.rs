@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::Parser;
 use itertools::Itertools;
 use rusqlite::{Connection, Result, params};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read};
@@ -119,6 +120,33 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
     Ok(())
 }
 
+fn find_duplicates_by<F>(cmp: F, mut files: Vec<FileRecord>) -> Vec<FileRecord>
+where
+    F: Fn(&FileRecord, &FileRecord) -> Ordering + Clone,
+{
+    files.sort_unstable_by(cmp.clone());
+    if files.len() == 0 {
+        return vec![];
+    }
+    let mut duplicates: Vec<FileRecord> = vec![];
+    let mut prev = &files[0];
+    for file in files.iter().skip(1) {
+        if cmp(prev, file).is_eq() {
+            let prev_is_added = duplicates
+                .last()
+                .map(|x| x.path == prev.path)
+                .unwrap_or(false);
+            if !prev_is_added {
+                duplicates.push(prev.clone());
+            }
+            duplicates.push(file.clone());
+        }
+        prev = file;
+    }
+
+    duplicates
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
@@ -163,22 +191,7 @@ fn main() -> Result<()> {
         .sorted_by(|a, b| a.size.cmp(&b.size))
         .collect();
 
-    let mut to_check_hash: Vec<FileRecord> = vec![];
-
-    let mut prev = &files[0];
-    for file in files.iter().skip(1) {
-        if file.size == prev.size {
-            let prev_is_added = to_check_hash
-                .last()
-                .map(|x| x.path == prev.path)
-                .unwrap_or(false);
-            if !prev_is_added {
-                to_check_hash.push(prev.clone());
-            }
-            to_check_hash.push(file.clone());
-        }
-        prev = file;
-    }
+    let to_check_hash: Vec<FileRecord> = find_duplicates_by(|a, b| a.size.cmp(&b.size), files);
 
     info!("Running md5sum on duplicates by size");
     let mut tx = conn.transaction()?;
@@ -204,29 +217,13 @@ fn main() -> Result<()> {
     }
     tx.commit()?;
 
-    info!("Finding duplicates by hash");    
+    info!("Finding duplicates by hash");
     let files: Vec<_> = fetch(&mut conn)
         .into_iter()
-        .filter(|x| config.is_included(Path::new(&x.path)))
-        .sorted_by(|a, b| a.size.cmp(&b.size))
+        .filter(|x| config.is_included(Path::new(&x.path)) && x.hash.is_some())
         .collect();
 
-    let mut duplicates: Vec<FileRecord> = vec![];
-
-    let mut prev = &files[0];
-    for file in files.iter().skip(1) {
-        if file.size == prev.size && file.hash == prev.hash {
-            let prev_is_added = duplicates
-                .last()
-                .map(|x| x.path == prev.path)
-                .unwrap_or(false);
-            if !prev_is_added {
-                duplicates.push(prev.clone());
-            }
-            duplicates.push(file.clone());
-        }
-        prev = file;
-    }
+    let duplicates: Vec<FileRecord> = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
 
     let mut prev = "".to_string();
     for duplicate in duplicates {
