@@ -207,7 +207,7 @@ fn main() -> Result<()> {
                 params![hash, file_data.path],
             )?;
             i += 1;
-            if i >= 5_000 || time.elapsed() > Duration::from_secs(10) {
+            if i >= 5_000 || time.elapsed() > Duration::from_secs(5) {
                 info!("Updated {} hash values", i);
                 tx.commit()?;
                 tx = conn.transaction()?;
