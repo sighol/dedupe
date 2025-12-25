@@ -26,7 +26,7 @@ struct Args {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct FileRecord {
     path: String,
     size: i64,
@@ -119,22 +119,20 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
     Ok(())
 }
 
-fn find_duplicates_by<F>(cmp: F, mut files: Vec<FileRecord>) -> Vec<FileRecord>
+fn find_duplicates_by<T, F>(cmp: F, mut files: Vec<T>) -> Vec<T>
 where
-    F: Fn(&FileRecord, &FileRecord) -> Ordering + Clone,
+    T: Eq + Clone,
+    F: Fn(&T, &T) -> Ordering + Clone,
 {
     files.sort_unstable_by(cmp.clone());
     if files.len() == 0 {
         return vec![];
     }
-    let mut duplicates: Vec<FileRecord> = vec![];
+    let mut duplicates: Vec<T> = vec![];
     let mut prev = &files[0];
     for file in files.iter().skip(1) {
         if cmp(prev, file).is_eq() {
-            let prev_is_added = duplicates
-                .last()
-                .map(|x| x.path == prev.path)
-                .unwrap_or(false);
+            let prev_is_added = duplicates.last().map(|x| x == prev).unwrap_or(false);
             if !prev_is_added {
                 duplicates.push(prev.clone());
             }
@@ -197,7 +195,11 @@ fn main() -> Result<()> {
 
     let file_size_to_hash = to_check_hash.iter().fold(0, |agg, x| agg + x.size);
 
-    info!("Running md5sum on {} duplicated files. Total {} bytes", to_check_hash.len(), file_size_to_hash);
+    info!(
+        "Running md5sum on {} duplicated files. Total {} bytes",
+        to_check_hash.len(),
+        humanize_bytes(file_size_to_hash as f64)
+    );
     let mut tx = conn.transaction()?;
     let mut i = 0;
     let mut time = Instant::now();
@@ -260,14 +262,53 @@ fn compute_md5(path: &str) -> io::Result<String> {
     Ok(format!("{:x}", context.finalize()))
 }
 
+fn humanize_bytes<T: Into<f64>>(bytes: T) -> String {
+    let suffixes = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    let bytes = bytes.into();
+    if bytes <= 0.0 {
+        return "0 B".to_string();
+    }
+
+    let unit: f64 = 1000.0;
+
+    let base = bytes.log10() / unit.log10();
+
+    let result = format!("{:.1}", unit.powf(base - base.floor()))
+        .trim_end_matches(".0")
+        .to_owned();
+
+    format!("{} {}", result, suffixes[base.floor() as usize])
+}
+
 #[cfg(test)]
 mod test {
     use std::path::Path;
+
+    use crate::{find_duplicates_by, humanize_bytes};
 
     #[test]
     fn test_pattern() {
         let pattern = glob::Pattern::new("**/test/**").unwrap();
         let path = Path::new("a/b/c/test/a");
         assert!(pattern.matches_path(path));
+    }
+
+    #[test]
+    fn test_find_duplicates_by() {
+        let values = vec![1, 2, 3, 4];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
+        assert_eq!(Vec::<i32>::new(), duplicates);
+    }
+
+    #[test]
+    fn test_find_duplicates_by_2() {
+        let values = vec![1, 2, 3, 4, 3];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
+        assert_eq!(vec![3, 3], duplicates);
+    }
+
+    #[test]
+    fn test_humanize() {
+        assert_eq!("34.5 KiB", humanize_bytes(34_500));
     }
 }
