@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
 import argparse
+from collections import defaultdict
+import hashlib
 import logging
 import sys
 from pathlib import Path
@@ -43,6 +45,9 @@ class File(Base):
     file_len = Column(Integer)
     is_deleted = Column(Boolean)
 
+    def __repr__(self):
+        return f"{self.file_path}: {self.file_len}, {self.file_hash}"
+
 
 def add_folder(session: Session, path: Path):
     if not path.exists():
@@ -74,6 +79,47 @@ def add_file(session: Session, path: Path):
     session.commit()
 
 
+def rescan_same_size(session: Session):
+    files = session.query(File).filter_by(is_deleted=False).all()
+
+    grouped_by_size: dict[int, list[File]] = {}
+    for file in files:
+        grouped_by_size[file.file_len] = grouped_by_size.get(file.file_len, []) + [file]
+    for key, values in grouped_by_size.items():
+        if len(values) > 1:
+            print()
+            for v in values:
+                if not v.file_hash:
+                    checksum = calculate_md5(Path(v.file_path))
+                    v.file_hash = checksum
+    session.commit()
+
+def calculate_md5(file_path):
+    # Open the file in binary mode and read its contents
+    with open(file_path, "rb") as file:
+        # Create an MD5 hash object
+        md5_hash = hashlib.md5()
+
+        # Read the file in chunks to avoid loading the entire file into memory
+        for chunk in iter(lambda: file.read(4096), b""):
+            # Update the MD5 hash with the read chunk
+            md5_hash.update(chunk)
+
+    # Return the hexadecimal representation of the computed MD5 hash
+    return md5_hash.hexdigest()
+
+def find_duplicates(session: Session):
+    files: list[File] = session.query(File).filter(File.file_hash != None, File.is_deleted == False).all()
+
+    groups = defaultdict(lambda: [])
+    for file in files:
+        groups[file.file_hash].append(file)
+
+    for _, group in groups.items():
+        for g in group:
+            print(g)
+        print()
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("PATH", nargs="+")
@@ -84,8 +130,11 @@ def main():
     session = Session(engine)
     Base.metadata.create_all(engine)
 
-    for path in args.PATH:
-        add_folder(session, Path(path))
+    # for path in args.PATH:
+    #     add_folder(session, Path(path))
+
+    rescan_same_size(session)
+    find_duplicates(session)
 
 
 if __name__ == "__main__":
