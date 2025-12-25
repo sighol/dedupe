@@ -76,7 +76,7 @@ fn fetch(conn: &mut Connection) -> Vec<FileRecord> {
         .unwrap()
         .flatten()
         .collect();
-    return existing_files;
+    existing_files
 }
 
 fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Result<()> {
