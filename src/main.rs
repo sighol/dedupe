@@ -259,7 +259,7 @@ fn main() -> anyhow::Result<()> {
         for file in files.iter() {
             files_by_path.insert(file.path.clone(), file.clone());
         }
-        for entry in WalkDir::new(report_dir).sort_by_file_name() {
+        for entry in WalkDir::new(&report_dir).sort_by_file_name() {
             let entry = entry?;
             if entry.path().is_dir() {
                 continue;
@@ -273,6 +273,9 @@ fn main() -> anyhow::Result<()> {
             if let Some(hash) = &file_record.hash {
                 let mut other_files = vec![];
                 for file in files.iter() {
+                    if Path::new(&file.path).starts_with(&report_dir) {
+                        continue;
+                    }
                     if let Some(other_hash) = &file.hash {
                         if hash == other_hash {
                             other_files.push(file.clone());
