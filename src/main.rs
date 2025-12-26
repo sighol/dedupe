@@ -283,7 +283,7 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 // let other_files_str = other_files.into_iter().map(|x| x.path).join(", ");
-                println!(" has {} other copies", other_files.len());
+                println!("has {} other copies", other_files.len());
             } else {
                 println!("Only copy");
             }
