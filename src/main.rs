@@ -3,7 +3,7 @@ use clap::Parser;
 use itertools::Itertools;
 use rusqlite::{Connection, Result, params};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -82,23 +82,17 @@ fn fetch(conn: &mut Connection) -> Vec<FileRecord> {
 }
 
 fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Result<()> {
-    let map = {
-        let existing_files = fetch(conn);
-        let mut map = HashMap::new();
-        for record in existing_files.into_iter() {
-            map.insert(record.path.clone(), record);
-        }
-        map
-    };
+    let map: HashSet<_> = fetch(conn).into_iter().map(|x| x.path).collect();
+
+    info!("Scanning files in '{}'", path.display());
 
     let mut tx = conn.transaction()?;
     let mut i = 0;
-
     for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             let path = entry.path();
             let path_name = path.display().to_string();
-            if !map.contains_key(&path_name) && config.is_included(path) {
+            if !map.contains(&path_name) && config.is_included(path) {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 tx.execute(
                     "INSERT INTO files (path, size) VALUES (?1, ?2)",
