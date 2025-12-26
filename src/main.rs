@@ -196,6 +196,7 @@ fn main() -> Result<()> {
     );
     let mut tx = conn.transaction()?;
     let mut i = 0;
+    let mut bytes = 0;
     let mut time = Instant::now();
     for file_data in to_check_hash {
         assert!(file_data.hash.is_none());
@@ -205,12 +206,14 @@ fn main() -> Result<()> {
                 params![hash, file_data.path],
             )?;
             i += 1;
+            bytes += file_data.size;
             if i >= 5_000 || time.elapsed() > Duration::from_secs(5) {
-                info!("Updated {} hash values", i);
+                info!("Computed hash for {} files. Total size: {}", i, humanize_bytes(bytes as f64));
                 tx.commit()?;
                 tx = conn.transaction()?;
                 i = 0;
                 time = Instant::now();
+                bytes = 0;
             }
         }
     }
