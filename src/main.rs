@@ -175,13 +175,14 @@ fn main() -> Result<()> {
         add_folder(&mut conn, &config, dir).expect("Failed to add folder");
     }
 
-    info!("Group by size");
+    info!("Fetching files and filtering out those that don't exist");
     let files: Vec<_> = fetch(&mut conn)
         .into_iter()
         .filter(|x| config.is_included(Path::new(&x.path)) && Path::new(&x.path).exists())
         .sorted_by(|a, b| a.size.cmp(&b.size))
         .collect();
 
+    info!("Group {} files by size", files.len());
     let to_check_hash: Vec<FileRecord> = find_duplicates_by(|a, b| a.size.cmp(&b.size), files)
         .into_iter()
         .filter(|x| x.hash.is_none())
@@ -190,7 +191,7 @@ fn main() -> Result<()> {
     let file_size_to_hash = to_check_hash.iter().fold(0, |agg, x| agg + x.size);
 
     info!(
-        "Running md5sum on {} duplicated files. Total {} bytes",
+        "Running md5sum on {} duplicated files. Total size: {}",
         to_check_hash.len(),
         humanize_bytes(file_size_to_hash as f64)
     );
@@ -243,7 +244,11 @@ fn main() -> Result<()> {
         if duplicate.hash.clone().unwrap() != prev {
             println!();
             prev = duplicate.hash.unwrap().clone();
-            println!("\nNew file: {} with size {}", &prev, &duplicate.size);
+            println!(
+                "\nNew file: {} with size {}",
+                &prev,
+                humanize_bytes(duplicate.size as f64)
+            );
         }
         println!("- {}", duplicate.path);
     }
