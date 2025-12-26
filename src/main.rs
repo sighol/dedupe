@@ -101,7 +101,7 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
                 i += 1;
 
                 if i >= 10_000 {
-                    info!("Committing {} items", i);
+                    info!("Adding {} files", i);
                     i = 0;
                     tx.commit().unwrap();
                     tx = conn.transaction().unwrap();
@@ -109,6 +109,7 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
             }
         }
     }
+    info!("Adding {} files", i);
     tx.commit().unwrap();
     Ok(())
 }
@@ -222,6 +223,11 @@ fn main() -> Result<()> {
             }
         }
     }
+    info!(
+        "Computed hash for {} files. Total size: {}",
+        i,
+        humanize_bytes(bytes as f64)
+    );
     tx.commit()?;
 
     info!("Finding duplicates by hash");
