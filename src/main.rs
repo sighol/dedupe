@@ -1,9 +1,9 @@
 use anyhow::Context;
 use clap::Parser;
 use itertools::Itertools;
-use rusqlite::{Connection, Result, params};
+use rusqlite::{Connection, params};
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -23,6 +23,12 @@ struct Args {
 
     #[arg(short, long)]
     exclude_globs: Vec<String>,
+
+    #[arg(
+        long,
+        help = "Walk the directory and report duplication states on each file"
+    )]
+    report_dir: Option<PathBuf>,
 }
 
 #[allow(dead_code)]
@@ -91,7 +97,7 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
     for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             let path = entry.path();
-            let path_name = path.display().to_string();
+            let path_name = path.canonicalize()?.display().to_string();
             if !map.contains(&path_name) && config.is_included(path) {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 tx.execute(
@@ -139,7 +145,7 @@ where
     duplicates
 }
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
     let mut conn = match args.db_path {
@@ -240,23 +246,55 @@ fn main() -> Result<()> {
         })
         .collect();
 
-    let duplicates: Vec<FileRecord> = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
-
-    let mut prev = "".to_string();
-    for duplicate in duplicates {
-        if duplicate.size < 1000 {
-            continue;
+    if let Some(report_dir) = args.report_dir {
+        let mut files_by_path = HashMap::new();
+        for file in files.iter() {
+            files_by_path.insert(file.path.clone(), file.clone());
         }
-        if duplicate.hash.clone().unwrap() != prev {
-            println!();
-            prev = duplicate.hash.unwrap().clone();
-            println!(
-                "\nNew file: {} with size {}",
-                &prev,
-                humanize_bytes(duplicate.size as f64)
-            );
+        for entry in WalkDir::new(report_dir).sort_by_file_name() {
+            let entry = entry?;
+            if entry.path().is_dir() {
+                continue;
+            }
+            let path = entry.path().canonicalize()?;
+            let path_name = path.display().to_string();
+            let file_record = &files_by_path
+                .get(&path_name)
+                .context(format!("Did not find {path_name}"))?;
+            print!("{path_name}: ");
+            if let Some(hash) = &file_record.hash {
+                let mut other_files = vec![];
+                for file in files.iter() {
+                    if let Some(other_hash) = &file.hash {
+                        if hash == other_hash {
+                            other_files.push(file.clone());
+                        }
+                    }
+                }
+                let other_files_str = other_files.into_iter().map(|x| x.path).join(", ");
+                println!("{other_files_str}");
+            } else {
+                println!("Only copy");
+            }
         }
-        println!("- {}", duplicate.path);
+    } else {
+        let duplicates: Vec<FileRecord> = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
+        let mut prev = "".to_string();
+        for duplicate in duplicates {
+            if duplicate.size < 1000 {
+                continue;
+            }
+            if duplicate.hash.clone().unwrap() != prev {
+                println!();
+                prev = duplicate.hash.unwrap().clone();
+                println!(
+                    "\nNew file: {} with size {}",
+                    &prev,
+                    humanize_bytes(duplicate.size as f64)
+                );
+            }
+            println!("- {}", duplicate.path);
+        }
     }
 
     Ok(())
