@@ -178,7 +178,7 @@ fn main() -> Result<()> {
     info!("Group by size");
     let files: Vec<_> = fetch(&mut conn)
         .into_iter()
-        .filter(|x| config.is_included(Path::new(&x.path)))
+        .filter(|x| config.is_included(Path::new(&x.path)) && Path::new(&x.path).exists())
         .sorted_by(|a, b| a.size.cmp(&b.size))
         .collect();
 
@@ -208,7 +208,11 @@ fn main() -> Result<()> {
             i += 1;
             bytes += file_data.size;
             if i >= 5_000 || time.elapsed() > Duration::from_secs(5) {
-                info!("Computed hash for {} files. Total size: {}", i, humanize_bytes(bytes as f64));
+                info!(
+                    "Computed hash for {} files. Total size: {}",
+                    i,
+                    humanize_bytes(bytes as f64)
+                );
                 tx.commit()?;
                 tx = conn.transaction()?;
                 i = 0;
@@ -222,7 +226,11 @@ fn main() -> Result<()> {
     info!("Finding duplicates by hash");
     let files: Vec<_> = fetch(&mut conn)
         .into_iter()
-        .filter(|x| config.is_included(Path::new(&x.path)) && x.hash.is_some())
+        .filter(|x| {
+            config.is_included(Path::new(&x.path))
+                && x.hash.is_some()
+                && Path::new(&x.path).exists()
+        })
         .collect();
 
     let duplicates: Vec<FileRecord> = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
