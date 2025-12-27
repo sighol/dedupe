@@ -17,7 +17,7 @@ use tracing::info;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "A tool to process multiple folders")]
+#[command(author, version, about = "A tool to find duplicated files.")]
 struct Args {
     /// List of folders to process
     #[arg(value_name = "FOLDER", num_args = 1.., required = true)]
