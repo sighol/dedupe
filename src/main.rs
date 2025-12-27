@@ -71,7 +71,7 @@ fn fetch(conn: &mut Connection) -> Vec<FileRecord> {
     let existing_files: Vec<FileRecord> = stmt
         .query_map([], |row| {
             Ok(FileRecord {
-                path: row.get(0).expect("Should get path"),
+                path: row.get::<_, String>(0).expect("Should get path").into(),
                 size: row.get(1).expect("should get size"),
                 hash: row.get(2).ok(),
             })
@@ -91,9 +91,9 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
     let mut i = 0;
     for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
-            let path = entry.path();
-            let path_name = path.canonicalize()?.display().to_string();
-            if !map.contains(&path_name) && config.is_included(path) {
+            let path = entry.path().canonicalize()?;
+            let path_name = path.display().to_string();
+            if !map.contains(&path) && config.is_included(&path) {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
                 tx.execute(
                     "INSERT INTO files (path, size) VALUES (?1, ?2)",
@@ -206,7 +206,7 @@ fn main() -> anyhow::Result<()> {
         if let Ok(hash) = compute_md5(&file_data.path) {
             tx.execute(
                 "UPDATE files SET hash = ?1 WHERE path = ?2",
-                params![hash, file_data.path],
+                params![hash, file_data.path.display().to_string()],
             )?;
             i += 1;
             bytes += file_data.size;
@@ -259,7 +259,7 @@ fn main() -> anyhow::Result<()> {
             let path = entry.path().canonicalize()?;
             let path_name = path.display().to_string();
             let file_record = &files_by_path
-                .get(&path_name)
+                .get(&path)
                 .context(format!("Did not find {path_name}"))?;
             print!("{path_name}: ");
             if let Some(hash) = &file_record.hash {
@@ -296,14 +296,14 @@ fn main() -> anyhow::Result<()> {
                     humanize_bytes(duplicate.size as f64)
                 );
             }
-            println!("- {}", duplicate.path);
+            println!("- {}", duplicate.path.display());
         }
     }
 
     Ok(())
 }
 
-fn compute_md5(path: &str) -> io::Result<String> {
+fn compute_md5(path: &Path) -> io::Result<String> {
     let mut file = File::open(path)?;
     let mut context = md5::Context::new();
     let mut buffer = [0; 1024];
