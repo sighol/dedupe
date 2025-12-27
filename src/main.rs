@@ -255,7 +255,7 @@ fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
 
     let mut redundant_size = 0;
     let mut duplicates = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
-    duplicates.sort_by_key(|x| x[0].size);
+    duplicates.sort_unstable_by_key(|x| x[0].size);
     for duplicate in duplicates {
         let size = duplicate[0].size;
         redundant_size += size * (duplicate.len() as i64 - 1);
