@@ -101,7 +101,7 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
     let mut i = 0;
     for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
-            let path = entry.path().canonicalize()?;
+            let path = entry.path();
             let path_name = path.display().to_string();
             if !map.contains(&path_name) && config.is_included(&path) {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
@@ -304,18 +304,16 @@ fn report_duplication_status_in_dir(
     }
     let mut unique_files = 0;
     let mut duplicated_files = 0;
+    let mut ignored_files = 0;
     println!();
     for entry in WalkDir::new(&report_dir).sort_by_file_name() {
         let entry = entry?;
-        let path = entry.path().canonicalize()?;
+        let path = entry.path();
         if path.is_dir() {
             continue;
         } else if !config.is_included(&path) {
-            eprintln!(
-                "File {} in report dir is not included.",
-                path.display().to_string().red()
-            );
-            std::process::exit(1);
+            ignored_files += 1;
+            continue;
         }
         let path_name = path
             .strip_prefix(&report_dir)
@@ -327,10 +325,13 @@ fn report_duplication_status_in_dir(
             .expect(&format!("Did not find {path:?}"));
         print!("{}: ", path_name.blue());
         if let Some(hash) = &file_record.hash {
-            let other_files: Vec<_> = files_by_hash[hash]
-                .iter()
-                .filter(|x| !x.path.starts_with(&report_dir))
-                .collect();
+            let other_files: Vec<_> = match files_by_hash.get(hash) {
+                Some(vec) => vec
+                    .iter()
+                    .filter(|x| !x.path.starts_with(&report_dir))
+                    .collect(),
+                None => vec![],
+            };
             if other_files.is_empty() {
                 unique_files += 1;
                 println!("Only copy");
@@ -352,9 +353,10 @@ fn report_duplication_status_in_dir(
     }
 
     println!(
-        "{} duplicated files and {} unique files",
+        "{} duplicated files, {} unique files, and {} ignored files",
         duplicated_files.to_string().bold().yellow(),
         unique_files.to_string().bold().yellow(),
+        ignored_files.to_string().bold().yellow(),
     );
     Ok(())
 }
