@@ -254,31 +254,35 @@ fn main() -> anyhow::Result<()> {
             }
         }
     } else {
-        info!("Finding duplicates by hash");
-        let files: Vec<_> = fetch(&mut conn)
-            .into_iter()
-            .filter(|x| {
-                config.is_included(Path::new(&x.path))
-                    && x.hash.is_some()
-                    && Path::new(&x.path).exists()
-            })
-            .collect();
-
-        let mut duplicates = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
-        duplicates.sort_by_key(|x| x[0].size);
-        for duplicate in duplicates {
-            let size = duplicate[0].size;
-            println!(
-                "\nDuplicated file with size {}",
-                humanize_bytes(size as f64)
-            );
-            for file_record in duplicate {
-                println!("- {}", file_record.path.display());
-            }
-        }
+        report_all_duplicated_files(&mut conn, &config);
     }
 
     Ok(())
+}
+
+fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
+    info!("Finding duplicates by hash");
+    let files: Vec<_> = fetch(conn)
+        .into_iter()
+        .filter(|x| {
+            config.is_included(Path::new(&x.path))
+                && x.hash.is_some()
+                && Path::new(&x.path).exists()
+        })
+        .collect();
+
+    let mut duplicates = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
+    duplicates.sort_by_key(|x| x[0].size);
+    for duplicate in duplicates {
+        let size = duplicate[0].size;
+        println!(
+            "\nDuplicated file with size {}",
+            humanize_bytes(size as f64)
+        );
+        for file_record in duplicate {
+            println!("- {}", file_record.path.display());
+        }
+    }
 }
 
 fn compute_md5(path: &Path) -> io::Result<String> {
