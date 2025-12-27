@@ -215,44 +215,7 @@ fn main() -> anyhow::Result<()> {
     tx.commit()?;
 
     if let Some(report_dir) = args.report_dir {
-        let files: Vec<_> = fetch(&mut conn)
-            .into_iter()
-            .filter(|x| config.is_included(Path::new(&x.path)) && Path::new(&x.path).exists())
-            .collect();
-
-        let mut files_by_path = HashMap::new();
-        for file in files.iter() {
-            files_by_path.insert(file.path.clone(), file.clone());
-        }
-        for entry in WalkDir::new(&report_dir).sort_by_file_name() {
-            let entry = entry?;
-            if entry.path().is_dir() {
-                continue;
-            }
-            let path = entry.path().canonicalize()?;
-            let path_name = path.display().to_string();
-            let file_record = &files_by_path
-                .get(&path)
-                .context(format!("Did not find {path_name}"))?;
-            print!("{path_name}: ");
-            if let Some(hash) = &file_record.hash {
-                let mut other_files = vec![];
-                for file in files.iter() {
-                    if Path::new(&file.path).starts_with(&report_dir) {
-                        continue;
-                    }
-                    if let Some(other_hash) = &file.hash {
-                        if hash == other_hash {
-                            other_files.push(file.clone());
-                        }
-                    }
-                }
-                // let other_files_str = other_files.into_iter().map(|x| x.path).join(", ");
-                println!("has {} other copies", other_files.len());
-            } else {
-                println!("Only copy");
-            }
-        }
+        report_duplication_status_in_dir(&mut conn, &config, &report_dir)?;
     } else {
         report_all_duplicated_files(&mut conn, &config);
     }
@@ -283,6 +246,52 @@ fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
             println!("- {}", file_record.path.display());
         }
     }
+}
+
+fn report_duplication_status_in_dir(
+    conn: &mut Connection,
+    config: &Config,
+    report_dir: &Path,
+) -> anyhow::Result<()> {
+    let files: Vec<_> = fetch(conn)
+        .into_iter()
+        .filter(|x| config.is_included(Path::new(&x.path)) && Path::new(&x.path).exists())
+        .collect();
+
+    let mut files_by_path = HashMap::new();
+    for file in files.iter() {
+        files_by_path.insert(file.path.clone(), file.clone());
+    }
+    for entry in WalkDir::new(&report_dir).sort_by_file_name() {
+        let entry = entry?;
+        if entry.path().is_dir() {
+            continue;
+        }
+        let path = entry.path().canonicalize()?;
+        let path_name = path.display().to_string();
+        let file_record = &files_by_path
+            .get(&path)
+            .context(format!("Did not find {path_name}"))?;
+        print!("{path_name}: ");
+        if let Some(hash) = &file_record.hash {
+            let mut other_files = vec![];
+            for file in files.iter() {
+                if Path::new(&file.path).starts_with(&report_dir) {
+                    continue;
+                }
+                if let Some(other_hash) = &file.hash {
+                    if hash == other_hash {
+                        other_files.push(file.clone());
+                    }
+                }
+            }
+            // let other_files_str = other_files.into_iter().map(|x| x.path).join(", ");
+            println!("has {} other copies", other_files.len());
+        } else {
+            println!("Only copy");
+        }
+    }
+    Ok(())
 }
 
 fn compute_md5(path: &Path) -> io::Result<String> {
