@@ -32,10 +32,8 @@ struct Args {
     #[arg(short = 'E', long)]
     exclude_regex: Vec<String>,
 
-    #[arg(
-        long,
-        help = "Walk the directory and report duplication states on each file"
-    )]
+    /// Walk the directory and report duplication states for each file.
+    #[arg(long)]
     report_dir: Option<PathBuf>,
 }
 
