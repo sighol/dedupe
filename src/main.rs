@@ -38,7 +38,9 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
     let args = Args::parse();
     let mut conn = match args.db_path {
         Some(path) => Connection::open(&path)?,
