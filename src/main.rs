@@ -37,86 +37,6 @@ struct Args {
     report_dir: Option<PathBuf>,
 }
 
-fn fetch(conn: &mut Connection) -> Vec<FileRecord> {
-    let mut stmt = conn
-        .prepare("select path, size, hash from files")
-        .expect("select all files");
-
-    let existing_files: Vec<FileRecord> = stmt
-        .query_map([], |row| {
-            Ok(FileRecord {
-                path: row.get::<_, String>(0).expect("Should get path").into(),
-                size: row.get(1).expect("should get size"),
-                hash: row.get(2).ok(),
-            })
-        })
-        .unwrap()
-        .flatten()
-        .collect();
-    existing_files
-}
-
-fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Result<()> {
-    let map: HashSet<_> = fetch(conn).into_iter().map(|x| x.path).collect();
-
-    info!("Scanning files in '{}'", path.display());
-
-    let mut tx = conn.transaction()?;
-    let mut i = 0;
-    for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() {
-            let path = entry.path().canonicalize()?;
-            let path_name = path.display().to_string();
-            if !map.contains(&path) && config.is_included(&path) {
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                tx.execute(
-                    "INSERT INTO files (path, size) VALUES (?1, ?2)",
-                    params![path_name, size as i64],
-                )?;
-                i += 1;
-
-                if i >= 10_000 {
-                    info!("Adding {} files", i);
-                    i = 0;
-                    tx.commit().unwrap();
-                    tx = conn.transaction().unwrap();
-                }
-            }
-        }
-    }
-    info!("Adding {} files", i);
-    tx.commit().unwrap();
-    Ok(())
-}
-
-fn find_duplicates_by<T, F>(cmp: F, mut files: Vec<T>) -> Vec<Vec<T>>
-where
-    T: Eq + Clone,
-    F: Fn(&T, &T) -> Ordering + Clone,
-{
-    files.sort_unstable_by(cmp.clone());
-    if files.len() == 0 {
-        return vec![];
-    }
-    let mut duplicate_groups: Vec<Vec<T>> = vec![];
-    let mut duplicates: Vec<T> = vec![];
-    for i in 1..files.len() {
-        let prev = &files[i - 1];
-        let next = &files[i];
-        if cmp(prev, next).is_eq() {
-            if duplicates.is_empty() {
-                duplicates.push(prev.clone());
-            }
-            duplicates.push(next.clone());
-        } else if !duplicates.is_empty() {
-            duplicate_groups.push(duplicates);
-            duplicates = vec![];
-        }
-    }
-
-    duplicate_groups
-}
-
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
@@ -170,6 +90,58 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Result<()> {
+    let map: HashSet<_> = fetch(conn).into_iter().map(|x| x.path).collect();
+
+    info!("Scanning files in '{}'", path.display());
+
+    let mut tx = conn.transaction()?;
+    let mut i = 0;
+    for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            let path = entry.path().canonicalize()?;
+            let path_name = path.display().to_string();
+            if !map.contains(&path) && config.is_included(&path) {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                tx.execute(
+                    "INSERT INTO files (path, size) VALUES (?1, ?2)",
+                    params![path_name, size as i64],
+                )?;
+                i += 1;
+
+                if i >= 10_000 {
+                    info!("Adding {} files", i);
+                    i = 0;
+                    tx.commit().unwrap();
+                    tx = conn.transaction().unwrap();
+                }
+            }
+        }
+    }
+    info!("Adding {} files", i);
+    tx.commit().unwrap();
+    Ok(())
+}
+
+fn fetch(conn: &mut Connection) -> Vec<FileRecord> {
+    let mut stmt = conn
+        .prepare("select path, size, hash from files")
+        .expect("select all files");
+
+    let existing_files: Vec<FileRecord> = stmt
+        .query_map([], |row| {
+            Ok(FileRecord {
+                path: row.get::<_, String>(0).expect("Should get path").into(),
+                size: row.get(1).expect("should get size"),
+                hash: row.get(2).ok(),
+            })
+        })
+        .unwrap()
+        .flatten()
+        .collect();
+    existing_files
+}
+
 fn hash_duplicated_candidates(conn: &mut Connection, config: &Config) -> anyhow::Result<()> {
     info!("Fetching files and filtering out those that don't exist");
     let files: Vec<_> = fetch(conn)
@@ -192,6 +164,15 @@ fn hash_duplicated_candidates(conn: &mut Connection, config: &Config) -> anyhow:
         to_check_hash.len(),
         humanize_bytes(file_size_to_hash as f64)
     );
+
+    fn log(count: usize, bytes: i64) {
+        info!(
+            "Computed hash for {} files. Total size: {}",
+            count,
+            humanize_bytes(bytes as f64)
+        );
+    }
+
     let mut tx = conn.transaction()?;
     let mut i = 0;
     let mut bytes = 0;
@@ -206,11 +187,7 @@ fn hash_duplicated_candidates(conn: &mut Connection, config: &Config) -> anyhow:
             i += 1;
             bytes += file_data.size;
             if i >= 5_000 || time.elapsed() > Duration::from_secs(5) {
-                info!(
-                    "Computed hash for {} files. Total size: {}",
-                    i,
-                    humanize_bytes(bytes as f64)
-                );
+                log(i, bytes);
                 tx.commit()?;
                 tx = conn.transaction()?;
                 i = 0;
@@ -219,14 +196,39 @@ fn hash_duplicated_candidates(conn: &mut Connection, config: &Config) -> anyhow:
             }
         }
     }
-    info!(
-        "Computed hash for {} files. Total size: {}",
-        i,
-        humanize_bytes(bytes as f64)
-    );
+
+    log(i, bytes);
     tx.commit()?;
 
     Ok(())
+}
+
+fn find_duplicates_by<T, F>(cmp: F, mut files: Vec<T>) -> Vec<Vec<T>>
+where
+    T: Eq + Clone,
+    F: Fn(&T, &T) -> Ordering + Clone,
+{
+    files.sort_unstable_by(cmp.clone());
+    if files.len() == 0 {
+        return vec![];
+    }
+    let mut duplicate_groups: Vec<Vec<T>> = vec![];
+    let mut duplicates: Vec<T> = vec![];
+    for i in 1..files.len() {
+        let prev = &files[i - 1];
+        let next = &files[i];
+        if cmp(prev, next).is_eq() {
+            if duplicates.is_empty() {
+                duplicates.push(prev.clone());
+            }
+            duplicates.push(next.clone());
+        } else if !duplicates.is_empty() {
+            duplicate_groups.push(duplicates);
+            duplicates = vec![];
+        }
+    }
+
+    duplicate_groups
 }
 
 fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
