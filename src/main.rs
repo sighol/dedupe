@@ -29,6 +29,9 @@ struct Args {
     #[arg(short, long)]
     exclude_globs: Vec<String>,
 
+    #[arg(short = 'E', long)]
+    exclude_regex: Vec<String>,
+
     #[arg(
         long,
         help = "Walk the directory and report duplication states on each file"
@@ -125,6 +128,11 @@ fn main() -> anyhow::Result<()> {
             .exclude_globs
             .iter()
             .map(|x| glob::Pattern::new(x).expect("Valid pattern"))
+            .collect(),
+        exclude_regex: args
+            .exclude_regex
+            .iter()
+            .map(|x| regex::Regex::new(x).expect("Valid regex pattern"))
             .collect(),
         includes: args
             .folders

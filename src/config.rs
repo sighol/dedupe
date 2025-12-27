@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub includes: Vec<PathBuf>,
     pub excludes: Vec<glob::Pattern>,
+    pub exclude_regex: Vec<regex::Regex>,
 }
 
 impl Config {
@@ -21,6 +22,12 @@ impl Config {
 
         for exc in self.excludes.iter() {
             if exc.matches_path(path) {
+                return false;
+            }
+        }
+
+        for regex in self.exclude_regex.iter() {
+            if regex.is_match(path.as_os_str().to_str().expect("Path is not printable")) {
                 return false;
             }
         }
