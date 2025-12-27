@@ -159,8 +159,20 @@ fn main() -> anyhow::Result<()> {
         add_folder(&mut conn, &config, dir).expect("Failed to add folder");
     }
 
+    hash_duplicated_candidates(&mut conn, &config)?;
+
+    if let Some(report_dir) = args.report_dir {
+        report_duplication_status_in_dir(&mut conn, &config, &report_dir)?;
+    } else {
+        report_all_duplicated_files(&mut conn, &config);
+    }
+
+    Ok(())
+}
+
+fn hash_duplicated_candidates(conn: &mut Connection, config: &Config) -> anyhow::Result<()> {
     info!("Fetching files and filtering out those that don't exist");
-    let files: Vec<_> = fetch(&mut conn)
+    let files: Vec<_> = fetch(conn)
         .into_iter()
         .filter(|x| config.is_included(Path::new(&x.path)) && Path::new(&x.path).exists())
         .sorted_by(|a, b| a.size.cmp(&b.size))
@@ -213,12 +225,6 @@ fn main() -> anyhow::Result<()> {
         humanize_bytes(bytes as f64)
     );
     tx.commit()?;
-
-    if let Some(report_dir) = args.report_dir {
-        report_duplication_status_in_dir(&mut conn, &config, &report_dir)?;
-    } else {
-        report_all_duplicated_files(&mut conn, &config);
-    }
 
     Ok(())
 }
