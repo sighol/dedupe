@@ -1,7 +1,9 @@
+mod config;
 mod file_record;
 
 use anyhow::Context;
 use clap::Parser;
+use config::Config;
 use file_record::FileRecord;
 use itertools::Itertools;
 use rusqlite::{Connection, params};
@@ -32,35 +34,6 @@ struct Args {
         help = "Walk the directory and report duplication states on each file"
     )]
     report_dir: Option<PathBuf>,
-}
-
-#[derive(Debug)]
-struct Config {
-    includes: Vec<PathBuf>,
-    excludes: Vec<glob::Pattern>,
-}
-
-impl Config {
-    fn is_included(&self, path: &Path) -> bool {
-        let mut is_included = false;
-        for inc in self.includes.iter() {
-            if path.starts_with(inc) {
-                is_included = true;
-                break;
-            }
-        }
-        if !is_included {
-            return false;
-        }
-
-        for exc in self.excludes.iter() {
-            if exc.matches_path(path) {
-                return false;
-            }
-        }
-
-        true
-    }
 }
 
 fn fetch(conn: &mut Connection) -> Vec<FileRecord> {
