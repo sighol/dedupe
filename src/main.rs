@@ -5,7 +5,6 @@ use anyhow::Context;
 use clap::Parser;
 use config::Config;
 use file_record::FileRecord;
-use itertools::Itertools;
 use rusqlite::{Connection, params};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -106,7 +105,6 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
             let path_name = path.display().to_string();
             if !map.contains(&path_name) && config.is_included(&path) {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                dbg!(&path_name);
                 tx.execute(
                     "INSERT INTO files (path, size) VALUES (?1, ?2)",
                     params![path_name, size as i64],
@@ -155,8 +153,7 @@ fn hash_duplicated_candidates(conn: &mut Connection, config: &Config) -> anyhow:
     info!("Fetching files and filtering out those that don't exist");
     let files: Vec<_> = fetch(conn)
         .into_iter()
-        .filter(|x| config.is_included(Path::new(&x.path)) && Path::new(&x.path).exists())
-        .sorted_by(|a, b| a.size.cmp(&b.size))
+        .filter(|x| config.is_included(&x.path) && x.path.exists())
         .collect();
 
     info!("Group {} files by size", files.len());
@@ -214,11 +211,11 @@ fn hash_duplicated_candidates(conn: &mut Connection, config: &Config) -> anyhow:
 
 fn find_duplicates_by<T, F>(cmp: F, mut files: Vec<T>) -> Vec<Vec<T>>
 where
-    T: Eq + Clone,
+    T: Eq + Clone + std::fmt::Debug,
     F: Fn(&T, &T) -> Ordering + Clone,
 {
     files.sort_unstable_by(cmp.clone());
-    if files.len() == 0 {
+    if files.is_empty() {
         return vec![];
     }
     let mut duplicate_groups: Vec<Vec<T>> = vec![];
@@ -235,6 +232,9 @@ where
             duplicate_groups.push(duplicates);
             duplicates = vec![];
         }
+    }
+    if !duplicates.is_empty() {
+        duplicate_groups.push(duplicates);
     }
 
     duplicate_groups
@@ -270,44 +270,78 @@ fn report_duplication_status_in_dir(
     config: &Config,
     report_dir: &Path,
 ) -> anyhow::Result<()> {
+    let report_dir = report_dir
+        .canonicalize()
+        .expect("Report dir could not be canonicalized.");
     let files: Vec<_> = fetch(conn)
         .into_iter()
-        .filter(|x| config.is_included(Path::new(&x.path)) && Path::new(&x.path).exists())
+        .filter(|x| config.is_included(&x.path) && x.path.exists())
         .collect();
+
+    let files_by_hash = {
+        let dups = find_duplicates_by(
+            |x, y| x.hash.cmp(&y.hash),
+            files.iter().filter(|x| x.hash.is_some()).collect(),
+        );
+        let mut map = HashMap::new();
+        for group in dups.into_iter() {
+            let hash = group[0].hash.clone().unwrap();
+            map.insert(hash, group);
+        }
+        map
+    };
 
     let mut files_by_path = HashMap::new();
     for file in files.iter() {
         files_by_path.insert(file.path.clone(), file.clone());
     }
+    let mut unique_files = 0;
+    let mut duplicated_files = 0;
     for entry in WalkDir::new(&report_dir).sort_by_file_name() {
         let entry = entry?;
         if entry.path().is_dir() {
             continue;
         }
         let path = entry.path().canonicalize()?;
-        let path_name = path.display().to_string();
+        let path_name = path
+            .strip_prefix(&report_dir)
+            .expect("File was found in report_dir")
+            .display()
+            .to_string();
         let file_record = &files_by_path
             .get(&path)
             .context(format!("Did not find {path_name}"))?;
         print!("{path_name}: ");
+        // if let Some(dup_group) = files_by_hash.get(file_record.has)
         if let Some(hash) = &file_record.hash {
-            let mut other_files = vec![];
-            for file in files.iter() {
-                if Path::new(&file.path).starts_with(&report_dir) {
-                    continue;
-                }
-                if let Some(other_hash) = &file.hash {
-                    if hash == other_hash {
-                        other_files.push(file.clone());
-                    }
-                }
+            let other_files: Vec<_> = files_by_hash[hash]
+                .iter()
+                .filter(|x| !x.path.starts_with(&report_dir))
+                .collect();
+            if other_files.is_empty() {
+                unique_files += 1;
+                println!("Only copy");
+                continue;
             }
-            // let other_files_str = other_files.into_iter().map(|x| x.path).join(", ");
-            println!("has {} other copies", other_files.len());
+            duplicated_files += 1;
+            println!(
+                "has {} other copies outside of the report dir",
+                other_files.len()
+            );
+            for f in other_files {
+                println!("  {}", f.path.display());
+            }
+            println!();
         } else {
+            unique_files += 1;
             println!("Only copy");
         }
     }
+
+    println!(
+        "{} duplicated files and {} unique files",
+        duplicated_files, unique_files
+    );
     Ok(())
 }
 
