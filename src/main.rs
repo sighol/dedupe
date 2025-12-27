@@ -3,6 +3,7 @@ mod file_record;
 
 use anyhow::Context;
 use clap::Parser;
+use colored::Colorize;
 use config::Config;
 use file_record::FileRecord;
 use rusqlite::{Connection, params};
@@ -257,10 +258,10 @@ fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
         let size = duplicate[0].size;
         println!(
             "\nDuplicated file with size {}",
-            humanize_bytes(size as f64)
+            humanize_bytes(size as f64).bold().yellow(),
         );
         for file_record in duplicate {
-            println!("- {}", file_record.path.display());
+            println!("  - {}", file_record.path.display());
         }
     }
 }
@@ -293,26 +294,32 @@ fn report_duplication_status_in_dir(
 
     let mut files_by_path = HashMap::new();
     for file in files.iter() {
-        files_by_path.insert(file.path.clone(), file.clone());
+        files_by_path.insert(file.path.display().to_string(), file.clone());
     }
     let mut unique_files = 0;
     let mut duplicated_files = 0;
+    println!();
     for entry in WalkDir::new(&report_dir).sort_by_file_name() {
         let entry = entry?;
-        if entry.path().is_dir() {
-            continue;
-        }
         let path = entry.path().canonicalize()?;
+        if path.is_dir() {
+            continue;
+        } else if !config.is_included(&path) {
+            eprintln!(
+                "File {} in report dir is not included.",
+                path.display().to_string().red()
+            );
+            std::process::exit(1);
+        }
         let path_name = path
             .strip_prefix(&report_dir)
             .expect("File was found in report_dir")
             .display()
             .to_string();
         let file_record = &files_by_path
-            .get(&path)
-            .context(format!("Did not find {path_name}"))?;
-        print!("{path_name}: ");
-        // if let Some(dup_group) = files_by_hash.get(file_record.has)
+            .get(&path.display().to_string())
+            .expect(&format!("Did not find {path:?}"));
+        print!("{}: ", path_name.blue());
         if let Some(hash) = &file_record.hash {
             let other_files: Vec<_> = files_by_hash[hash]
                 .iter()
@@ -326,10 +333,10 @@ fn report_duplication_status_in_dir(
             duplicated_files += 1;
             println!(
                 "has {} other copies outside of the report dir",
-                other_files.len()
+                other_files.len().to_string().yellow().bold(),
             );
             for f in other_files {
-                println!("  {}", f.path.display());
+                println!("  - {}", f.path.display());
             }
             println!();
         } else {
@@ -340,7 +347,8 @@ fn report_duplication_status_in_dir(
 
     println!(
         "{} duplicated files and {} unique files",
-        duplicated_files, unique_files
+        duplicated_files.to_string().bold().yellow(),
+        unique_files.to_string().bold().yellow(),
     );
     Ok(())
 }
