@@ -9,6 +9,9 @@ pub struct Config {
 
 impl Config {
     pub fn is_included(&self, path: &Path) -> bool {
+        if path.is_symlink() {
+            return false;
+        }
         let mut is_included = false;
         for inc in self.includes.iter() {
             if path.starts_with(inc) {
