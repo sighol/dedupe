@@ -27,7 +27,7 @@ impl Config {
         }
 
         for regex in self.exclude_regex.iter() {
-            if regex.is_match(path.as_os_str().to_str().expect("Path is not printable")) {
+            if path.to_str().map_or(false, |s| regex.is_match(s)) {
                 return false;
             }
         }
