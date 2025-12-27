@@ -1,5 +1,8 @@
+mod file_record;
+
 use anyhow::Context;
 use clap::Parser;
+use file_record::FileRecord;
 use itertools::Itertools;
 use rusqlite::{Connection, params};
 use std::cmp::Ordering;
@@ -29,14 +32,6 @@ struct Args {
         help = "Walk the directory and report duplication states on each file"
     )]
     report_dir: Option<PathBuf>,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct FileRecord {
-    path: String,
-    size: i64,
-    hash: Option<String>,
 }
 
 #[derive(Debug)]
@@ -249,10 +244,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(report_dir) = args.report_dir {
         let files: Vec<_> = fetch(&mut conn)
             .into_iter()
-            .filter(|x| {
-                config.is_included(Path::new(&x.path))
-                    && Path::new(&x.path).exists()
-            })
+            .filter(|x| config.is_included(Path::new(&x.path)) && Path::new(&x.path).exists())
             .collect();
 
         let mut files_by_path = HashMap::new();
