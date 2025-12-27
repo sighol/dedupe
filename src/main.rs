@@ -89,7 +89,7 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
     Ok(())
 }
 
-fn find_duplicates_by<T, F>(cmp: F, mut files: Vec<T>) -> Vec<T>
+fn find_duplicates_by<T, F>(cmp: F, mut files: Vec<T>) -> Vec<Vec<T>>
 where
     T: Eq + Clone,
     F: Fn(&T, &T) -> Ordering + Clone,
@@ -98,20 +98,23 @@ where
     if files.len() == 0 {
         return vec![];
     }
+    let mut duplicate_groups: Vec<Vec<T>> = vec![];
     let mut duplicates: Vec<T> = vec![];
-    let mut prev = &files[0];
-    for file in files.iter().skip(1) {
-        if cmp(prev, file).is_eq() {
-            let prev_is_added = duplicates.last().map(|x| x == prev).unwrap_or(false);
-            if !prev_is_added {
+    for i in 1..files.len() {
+        let prev = &files[i - 1];
+        let next = &files[i];
+        if cmp(prev, next).is_eq() {
+            if duplicates.is_empty() {
                 duplicates.push(prev.clone());
             }
-            duplicates.push(file.clone());
+            duplicates.push(next.clone());
+        } else if !duplicates.is_empty() {
+            duplicate_groups.push(duplicates);
+            duplicates = vec![];
         }
-        prev = file;
     }
 
-    duplicates
+    duplicate_groups
 }
 
 fn main() -> anyhow::Result<()> {
@@ -166,6 +169,7 @@ fn main() -> anyhow::Result<()> {
     info!("Group {} files by size", files.len());
     let to_check_hash: Vec<FileRecord> = find_duplicates_by(|a, b| a.size.cmp(&b.size), files)
         .into_iter()
+        .flatten()
         .filter(|x| x.hash.is_none())
         .collect();
 
@@ -210,16 +214,6 @@ fn main() -> anyhow::Result<()> {
     );
     tx.commit()?;
 
-    info!("Finding duplicates by hash");
-    let files: Vec<_> = fetch(&mut conn)
-        .into_iter()
-        .filter(|x| {
-            config.is_included(Path::new(&x.path))
-                && x.hash.is_some()
-                && Path::new(&x.path).exists()
-        })
-        .collect();
-
     if let Some(report_dir) = args.report_dir {
         let files: Vec<_> = fetch(&mut conn)
             .into_iter()
@@ -260,22 +254,27 @@ fn main() -> anyhow::Result<()> {
             }
         }
     } else {
-        let duplicates: Vec<FileRecord> = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
-        let mut prev = "".to_string();
+        info!("Finding duplicates by hash");
+        let files: Vec<_> = fetch(&mut conn)
+            .into_iter()
+            .filter(|x| {
+                config.is_included(Path::new(&x.path))
+                    && x.hash.is_some()
+                    && Path::new(&x.path).exists()
+            })
+            .collect();
+
+        let mut duplicates = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
+        duplicates.sort_by_key(|x| x[0].size);
         for duplicate in duplicates {
-            if duplicate.size < 1000 {
-                continue;
+            let size = duplicate[0].size;
+            println!(
+                "\nDuplicated file with size {}",
+                humanize_bytes(size as f64)
+            );
+            for file_record in duplicate {
+                println!("- {}", file_record.path.display());
             }
-            if duplicate.hash.clone().unwrap() != prev {
-                println!();
-                prev = duplicate.hash.unwrap().clone();
-                println!(
-                    "\nNew file: {} with size {}",
-                    &prev,
-                    humanize_bytes(duplicate.size as f64)
-                );
-            }
-            println!("- {}", duplicate.path.display());
         }
     }
 
@@ -333,14 +332,14 @@ mod test {
     fn test_find_duplicates_by() {
         let values = vec![1, 2, 3, 4];
         let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
-        assert_eq!(Vec::<i32>::new(), duplicates);
+        assert_eq!(Vec::<Vec<i32>>::new(), duplicates);
     }
 
     #[test]
     fn test_find_duplicates_by_2() {
         let values = vec![1, 2, 3, 4, 3];
         let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
-        assert_eq!(vec![3, 3], duplicates);
+        assert_eq!(vec![vec![3, 3]], duplicates);
     }
 
     #[test]
