@@ -386,9 +386,8 @@ fn humanize_bytes<T: Into<f64>>(bytes: T) -> String {
 
     let base = bytes.log10() / unit.log10();
 
-    let result = format!("{:.1}", unit.powf(base - base.floor()))
-        .trim_end_matches(".0")
-        .to_owned();
+    let value = bytes / unit.powf(base.floor());
+    let result = format!("{:.1}", value).trim_end_matches(".0").to_owned();
 
     format!("{} {}", result, suffixes[base.floor() as usize])
 }
