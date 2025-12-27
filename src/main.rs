@@ -97,7 +97,6 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
         .collect();
 
     info!("Scanning files in '{}'", path.display());
-
     let mut tx = conn.transaction()?;
     let mut i = 0;
     for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
@@ -412,6 +411,13 @@ mod test {
         let values = vec![1, 2, 3, 4, 3];
         let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
         assert_eq!(vec![vec![3, 3]], duplicates);
+    }
+
+    #[test]
+    fn test_find_duplicates_all_duplicated() {
+        let values = vec![1, 1, 1];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
+        assert_eq!(vec![vec![1, 1, 1]], duplicates);
     }
 
     #[test]
