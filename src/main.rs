@@ -251,10 +251,12 @@ fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
         })
         .collect();
 
+    let mut redundant_size = 0;
     let mut duplicates = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
     duplicates.sort_by_key(|x| x[0].size);
     for duplicate in duplicates {
         let size = duplicate[0].size;
+        redundant_size += size * (duplicate.len() as i64 - 1);
         println!(
             "\nDuplicated file with size {}",
             humanize_bytes(size as f64).bold().yellow(),
@@ -263,6 +265,11 @@ fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
             println!("  - {}", file_record.path.display());
         }
     }
+
+    println!(
+        "\nRedundant size: {}",
+        humanize_bytes(redundant_size as f64).yellow().bold()
+    );
 }
 
 fn report_duplication_status_in_dir(
