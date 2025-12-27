@@ -91,7 +91,10 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Result<()> {
-    let map: HashSet<_> = fetch(conn).into_iter().map(|x| x.path).collect();
+    let map: HashSet<_> = fetch(conn)
+        .into_iter()
+        .map(|x| x.path.display().to_string())
+        .collect();
 
     info!("Scanning files in '{}'", path.display());
 
@@ -101,12 +104,18 @@ fn add_folder(conn: &mut Connection, config: &Config, path: &Path) -> anyhow::Re
         if entry.file_type().is_file() {
             let path = entry.path().canonicalize()?;
             let path_name = path.display().to_string();
-            if !map.contains(&path) && config.is_included(&path) {
+            if !map.contains(&path_name) && config.is_included(&path) {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                dbg!(&path_name);
                 tx.execute(
                     "INSERT INTO files (path, size) VALUES (?1, ?2)",
                     params![path_name, size as i64],
-                )?;
+                )
+                .context(format!(
+                    "Failed to insert {}, {}",
+                    &path_name,
+                    path.display()
+                ))?;
                 i += 1;
 
                 if i >= 10_000 {
