@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -5,6 +6,7 @@ pub struct Config {
     pub includes: Vec<PathBuf>,
     pub exclude_regex: Vec<regex::Regex>,
     pub min_size: u64,
+    pub scores: Vec<Score>,
 }
 
 impl Config {
@@ -30,5 +32,40 @@ impl Config {
         }
 
         true
+    }
+
+    pub fn get_score(&self, path: &str) -> Option<i64> {
+        for score in self.scores.iter() {
+            if score.pattern.is_match(path) {
+                return Some(score.score);
+            }
+        }
+        return None;
+    }
+}
+
+#[derive(Debug)]
+pub struct Score {
+    pub score: i64,
+    pub pattern: regex::Regex,
+}
+
+impl Score {
+    pub fn parse(s: &str) -> anyhow::Result<Self> {
+        let Some((score, regex)) = s.split_once('=') else {
+            anyhow::bail!("Does does not contain =");
+        };
+
+        let score: i64 = match score.parse() {
+            Ok(score) => score,
+            e => e.context("Score is not a number")?,
+        };
+
+        let pattern = match regex::Regex::new(regex) {
+            Ok(r) => r,
+            e => e.context("Bad regex")?,
+        };
+
+        Ok(Self { score, pattern })
     }
 }

@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 use tracing::info;
 use walkdir::WalkDir;
 
+use crate::config::Score;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about = "A tool to find duplicated files.")]
 struct Args {
@@ -36,6 +38,14 @@ struct Args {
     /// Walk the directory and report duplication states for each file.
     #[arg(long)]
     report_dir: Option<PathBuf>,
+
+    /// Used for deleting duplicates. The duplicates with the lowest scores will be deleted.
+    #[arg(short, long)]
+    score: Vec<String>,
+
+    /// Delete lowest-scoring duplicates.
+    #[arg(long)]
+    delete: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -63,6 +73,11 @@ fn main() -> anyhow::Result<()> {
             })
             .collect::<Result<Vec<PathBuf>, anyhow::Error>>()
             .unwrap(),
+        scores: args
+            .score
+            .iter()
+            .map(|x| Score::parse(x).expect("Bad score"))
+            .collect(),
     };
 
     conn.execute(
@@ -87,7 +102,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(report_dir) = args.report_dir {
         report_duplication_status_in_dir(&config, files, &report_dir)?;
     } else {
-        report_all_duplicated_files(files);
+        report_all_duplicated_files(&config, files, args.delete);
     }
 
     Ok(())
@@ -102,6 +117,11 @@ fn add_folder(
     for file in fetch(conn, path) {
         map.insert(file.path.display().to_string(), file);
     }
+    info!(
+        "Found {} files in the db cache starting at path {}",
+        map.len(),
+        path.display()
+    );
 
     info!("Scanning files in '{}'", path.display());
     let mut tx = conn.transaction()?;
@@ -114,13 +134,14 @@ fn add_folder(
             if !config.is_included(&path) {
                 continue;
             }
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            if size < config.min_size {
+                continue;
+            }
+
             if let Some(existing) = map.get(&path_name) {
                 files.push(existing.clone());
             } else {
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                if size < config.min_size {
-                    continue;
-                }
                 let file_record = FileRecord {
                     path: path.to_owned(),
                     size: size as i64,
@@ -155,7 +176,7 @@ fn add_folder(
 
 fn fetch(conn: &mut Connection, path: &Path) -> Vec<FileRecord> {
     let mut stmt = conn
-        .prepare("select path, size, hash from files where path LIKE (?1 || '%')")
+        .prepare("select path, size, hash from files where path LIKE (?1 || '/%')")
         .expect("select all files");
 
     let existing_files: Vec<FileRecord> = stmt
@@ -180,10 +201,11 @@ fn hash_duplicated_candidates(
     let to_check_hash: Vec<usize> = find_duplicates_indexes_by(|a, b| a.size.cmp(&b.size), files)
         .into_iter()
         .flatten()
-        .filter(|i|
+        .filter(|i| {
             // Only compute hash for files that don't have a hash in the db, and files that are not empty.
             // Duplicated empty files don't count.
-            files[*i].hash.is_none() && files[*i].size > 0)
+            files[*i].hash.is_none() && files[*i].size > 0
+        })
         .collect();
 
     let file_size_to_hash = to_check_hash.iter().fold(0, |agg, x| agg + files[*x].size);
@@ -298,7 +320,7 @@ where
     duplicate_groups
 }
 
-fn report_all_duplicated_files(files: Vec<FileRecord>) {
+fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: bool) {
     info!("Finding duplicates by hash");
     let mut files: Vec<_> = files.into_iter().filter(|x| x.hash.is_some()).collect();
 
@@ -312,8 +334,66 @@ fn report_all_duplicated_files(files: Vec<FileRecord>) {
             "\nDuplicated file with size {}",
             humanize_bytes(size as f64).bold().yellow(),
         );
+        let mut scored_file_records = vec![];
+        let mut lowest_score = i64::MAX;
         for file_record in duplicate {
-            println!("  - {}", file_record.path.display());
+            let path_name = file_record.path.display().to_string();
+            let score = config.get_score(&path_name);
+            scored_file_records.push((file_record, score));
+            if let Some(score) = score
+                && score < lowest_score
+            {
+                lowest_score = score;
+            }
+        }
+
+        if scored_file_records.iter().any(|(_, score)| score.is_some()) {
+            // Can only delete if all files are scored and not all share the same score.
+            let has_deletables = {
+                let scored_files = scored_file_records
+                    .iter()
+                    .filter(|(_, score)| score.is_some())
+                    .count();
+                let files_with_lowest_score = scored_file_records
+                    .iter()
+                    .filter(|(_, score)| *score == Some(lowest_score))
+                    .count();
+                scored_files == scored_file_records.len() && files_with_lowest_score != scored_files
+            };
+            scored_file_records.sort_by_key(|(_, score)| score.unwrap_or(i64::MAX));
+            scored_file_records.reverse();
+            for (file_record, score) in scored_file_records {
+                let score_fmt = match score {
+                    Some(value) => {
+                        format!("{}: {}", "Score".green(), value.to_string().bold().blue())
+                    }
+                    None => format!("{}", "No score".bold().red()),
+                };
+                let lowest_score_fmt = if score == Some(lowest_score) && has_deletables {
+                    // Deleting while computing the lowest_score_fmt is so ugly.
+                    if delete {
+                        match std::fs::remove_file(&file_record.path) {
+                            Ok(()) => format!("{}", " Deleted".bold().green()),
+                            Err(e) => format!("{} {:?}", " Failed to delete".red(), e),
+                        }
+                    } else {
+                        format!("{}", " to be deleted".bold().red())
+                    }
+                } else {
+                    String::new()
+                };
+                println!(
+                    "  - {} {}{}",
+                    file_record.path.display(),
+                    score_fmt,
+                    lowest_score_fmt
+                );
+            }
+        } else {
+            scored_file_records.sort_by(|(a, _), (b, _)| a.path.cmp(&b.path));
+            for (file_record, _) in scored_file_records {
+                println!("  - {}", file_record.path.display());
+            }
         }
     }
 
