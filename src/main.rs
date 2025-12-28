@@ -88,9 +88,9 @@ fn main() -> anyhow::Result<()> {
     hash_duplicated_candidates(&mut conn, &mut files)?;
 
     if let Some(report_dir) = args.report_dir {
-        report_duplication_status_in_dir(&mut conn, &config, &report_dir)?;
+        report_duplication_status_in_dir(&config, files, &report_dir)?;
     } else {
-        report_all_duplicated_files(&mut conn, &config);
+        report_all_duplicated_files(files);
     }
 
     Ok(())
@@ -177,13 +177,16 @@ fn hash_duplicated_candidates(
     files: &mut [FileRecord],
 ) -> anyhow::Result<()> {
     info!("Group {} files by size", files.len());
-    let to_check_hash: Vec<FileRecord> = find_duplicates_by(|a, b| a.size.cmp(&b.size), files)
+    let to_check_hash: Vec<usize> = find_duplicates_indexes_by(|a, b| a.size.cmp(&b.size), files)
         .into_iter()
         .flatten()
-        .filter(|x| x.hash.is_none())
+        .filter(|i|
+            // Only compute hash for files that don't have a hash in the db, and files that are not empty.
+            // Duplicated empty files don't count.
+            files[*i].hash.is_none() && files[*i].size > 0)
         .collect();
 
-    let file_size_to_hash = to_check_hash.iter().fold(0, |agg, x| agg + x.size);
+    let file_size_to_hash = to_check_hash.iter().fold(0, |agg, x| agg + files[*x].size);
 
     info!(
         "Running md5sum on {} duplicated files. Total size: {}",
@@ -203,9 +206,12 @@ fn hash_duplicated_candidates(
     let mut i = 0;
     let mut bytes = 0;
     let mut time = Instant::now();
-    for file_data in to_check_hash {
-        assert!(file_data.hash.is_none());
+    for index in to_check_hash {
+        let file_data: &mut FileRecord = files
+            .get_mut(index)
+            .expect("Could not find index in files array");
         if let Ok(hash) = compute_md5(&file_data.path) {
+            file_data.hash = Some(hash.clone());
             tx.execute(
                 "UPDATE files SET hash = ?1 WHERE path = ?2",
                 params![hash, file_data.path.display().to_string()],
@@ -292,16 +298,9 @@ where
     duplicate_groups
 }
 
-fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
+fn report_all_duplicated_files(files: Vec<FileRecord>) {
     info!("Finding duplicates by hash");
-    let mut files: Vec<_> = fetch(conn)
-        .into_iter()
-        .filter(|x| {
-            config.is_included(Path::new(&x.path))
-                && x.hash.is_some()
-                && Path::new(&x.path).exists()
-        })
-        .collect();
+    let mut files: Vec<_> = files.into_iter().filter(|x| x.hash.is_some()).collect();
 
     let mut redundant_size = 0;
     let mut duplicates = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), &mut files);
@@ -325,17 +324,13 @@ fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
 }
 
 fn report_duplication_status_in_dir(
-    conn: &mut Connection,
     config: &Config,
+    files: Vec<FileRecord>,
     report_dir: &Path,
 ) -> anyhow::Result<()> {
     let report_dir = report_dir
         .canonicalize()
         .expect("Report dir could not be canonicalized.");
-    let files: Vec<_> = fetch(conn)
-        .into_iter()
-        .filter(|x| config.is_included(&x.path) && x.path.exists())
-        .collect();
 
     let files_by_hash = {
         let mut files_with_hash: Vec<_> = files.iter().filter(|x| x.hash.is_some()).collect();
@@ -389,8 +384,9 @@ fn report_duplication_status_in_dir(
             }
             duplicated_files += 1;
             println!(
-                "has {} other copies outside of the report dir",
+                "{} other copies. File size: {}.",
                 other_files.len().to_string().yellow().bold(),
+                humanize_bytes(file_record.size as f64).yellow().bold(),
             );
             for f in other_files {
                 println!("  - {}", f.path.display());
@@ -403,7 +399,7 @@ fn report_duplication_status_in_dir(
     }
 
     println!(
-        "{} duplicated files, {} unique files, and {} ignored files",
+        "\n{} duplicated files, {} unique files, and {} ignored files",
         duplicated_files.to_string().bold().yellow(),
         unique_files.to_string().bold().yellow(),
         ignored_files.to_string().bold().yellow(),
