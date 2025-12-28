@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-clap = { version = "4.5.53", features = ["derive"] }
+clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 colored = { version = "3.0.0", features = [] }
 md5 = "0.8.0"
 regex = "1.12.2"

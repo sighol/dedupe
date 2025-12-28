@@ -21,11 +21,9 @@ dedupe FOLDER1 FOLDER2 --report-dir FOLDER1/test/sub/folder
 It will then report how many files are unique to `FOLDER1/test/sub/folder` and how many are
 duplicates from other places in FOLDER1 and FOLDER2.
 
-# TODO
-
 ## Automatic cleanup by adding a score to each file
 
-Add scoring of files based on the file name. For a duplication group, it only keep the file with the
+Add scoring of files based on the file name. For a duplication group, it only keeps the file with the
 highest scoring file name, and delete the rest.
 
 To add a score:
@@ -34,14 +32,16 @@ To add a score:
 dedupe FOLDER1 FOLDER2 --score=50=MY_REGEX --score=100=MY_OTHER_REGEX
 ```
 
-Each file will get the score of the first regex that matches.
-Files from a duplication group will only be deleted if all files in the group has a score.
+Each file will get the score of the first regex that matches. Files from a duplication group will
+only be deleted if all files in the group has a score and not all files have the same score.
 
 To perform deletion:
 
 ```shell
 dedupe FOLDER1 FOLDER2 --score=50=MY_REGEX --score=100=MY_OTHER_REGEX --delete
 ```
+
+# TODO
 
 ## Clean up CLI interface
 

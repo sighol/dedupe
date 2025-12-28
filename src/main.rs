@@ -21,13 +21,18 @@ use crate::config::Score;
 #[derive(Parser, Debug)]
 #[command(author, version, about = "A tool to find duplicated files.")]
 struct Args {
-    /// List of folders to process
+    /// List of folders to process.
     #[arg(value_name = "FOLDER", num_args = 1.., required = true)]
     folders: Vec<PathBuf>,
 
+    /// Database cache file for checksums.
+    ///
+    /// The file will be created if it does not exist. For big file hierarchies, this greatly
+    /// improves the performance.
     #[arg(short, long)]
     db_path: Option<PathBuf>,
 
+    /// Exclude files where the regex matches any part of the full file path.
     #[arg(short = 'e', long)]
     exclude_regex: Vec<String>,
 
@@ -39,7 +44,16 @@ struct Args {
     #[arg(long)]
     report_dir: Option<PathBuf>,
 
-    /// Used for deleting duplicates. The duplicates with the lowest scores will be deleted.
+    /// Add scores to path patterns for cleanup.
+    ///
+    /// The scores will be processed for each group of duplicated files. Only the files that have a
+    /// score equal to the lowest score in the group will be considered for deletion. If all the
+    /// files in the group have the same score, nothing will be deleted.
+    ///
+    /// Files will only be deleted if the --delete flag is set.
+    ///
+    /// Format is --score SCORE=REGEX.
+    /// Example: --score 10=/duplicates/
     #[arg(short, long)]
     score: Vec<String>,
 
