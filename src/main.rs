@@ -32,6 +32,10 @@ struct Args {
     #[arg(short = 'E', long)]
     exclude_regex: Vec<String>,
 
+    /// Exclude files smaller than this file size in bytes.
+    #[arg(short, long)]
+    min_size: Option<u64>,
+
     /// Walk the directory and report duplication states for each file.
     #[arg(long)]
     report_dir: Option<PathBuf>,
@@ -47,6 +51,7 @@ fn main() -> anyhow::Result<()> {
         None => Connection::open_in_memory()?,
     };
     let config = Config {
+        min_size: args.min_size.unwrap_or(0),
         excludes: args
             .exclude_globs
             .iter()
@@ -121,6 +126,9 @@ fn add_folder(
                 files.push(existing.clone());
             } else {
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                if size < config.min_size {
+                    continue;
+                }
                 let file_record = FileRecord {
                     path: path.to_owned(),
                     size: size as i64,
@@ -368,6 +376,10 @@ fn report_duplication_status_in_dir(
         let file_record = &files_by_path
             .get(&path.display().to_string())
             .expect(&format!("Did not find {path:?}"));
+        if file_record.size < config.min_size as i64 {
+            ignored_files += 1;
+            continue;
+        }
         print!("{}: ", path_name.blue());
         if let Some(hash) = &file_record.hash {
             let other_files: Vec<_> = match files_by_hash.get(hash) {

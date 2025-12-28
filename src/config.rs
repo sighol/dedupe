@@ -5,6 +5,7 @@ pub struct Config {
     pub includes: Vec<PathBuf>,
     pub excludes: Vec<glob::Pattern>,
     pub exclude_regex: Vec<regex::Regex>,
+    pub min_size: u64,
 }
 
 impl Config {
