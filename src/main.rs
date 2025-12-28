@@ -10,7 +10,7 @@ use rusqlite::{Connection, params};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tracing::info;
@@ -340,6 +340,7 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
     let mut redundant_size = 0;
     let mut duplicates = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), &mut files);
     duplicates.sort_unstable_by_key(|x| x[0].size);
+    let mut to_delete = vec![];
     for duplicate in duplicates {
         let size = duplicate[0].size;
         let hash = duplicate[0]
@@ -390,16 +391,12 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
                     }
                     None => format!("{}", "No score".bold().red()),
                 };
-                let lowest_score_fmt = if score == Some(lowest_score) && has_deletables {
-                    // Deleting while computing the lowest_score_fmt is so ugly.
-                    if delete {
-                        match std::fs::remove_file(&file_record.path) {
-                            Ok(()) => format!("{}", " Deleted".bold().green()),
-                            Err(e) => format!("{} {:?}", " Failed to delete".red(), e),
-                        }
-                    } else {
-                        format!("{}", " to be deleted".bold().red())
-                    }
+                let is_delete_candidate = score == Some(lowest_score) && has_deletables;
+                if is_delete_candidate {
+                    to_delete.push(file_record.clone());
+                }
+                let lowest_score_fmt = if is_delete_candidate {
+                    format!("{}", " to be deleted".bold().red())
                 } else {
                     String::new()
                 };
@@ -422,6 +419,29 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
         "\nRedundant size: {}",
         humanize_bytes(redundant_size as f64).yellow().bold()
     );
+
+    if !to_delete.is_empty() && delete {
+        let total_size: i64 = to_delete.iter().map(|x| x.size).sum();
+        print!(
+            "\nAre you sure you want to delete {} files of total size {}? [y/n]: ",
+            to_delete.len().to_string().bold().yellow(),
+            humanize_bytes(total_size as f64).bold().yellow(),
+        );
+        std::io::stdout().flush().unwrap();
+        let mut response = String::new();
+        std::io::stdin()
+            .read_line(&mut response)
+            .expect("Failed to read from stdin");
+        if response.trim().to_lowercase() == "y" {
+            for file in to_delete {
+                print!("- {}", file.path.display());
+                match std::fs::remove_file(&file.path) {
+                    Ok(()) => println!(" {}", "deleted".green()),
+                    Err(e) => println!(" {} {}", "failed to delete".red().bold(), e),
+                }
+            }
+        }
+    }
 }
 
 fn report_duplication_status_in_dir(
@@ -529,7 +549,7 @@ fn compute_md5(path: &Path) -> io::Result<String> {
 }
 
 fn humanize_bytes<T: Into<f64>>(bytes: T) -> String {
-    let suffixes = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    let suffixes = ["B", "KB", "MB", "GB", "TB", "PB"];
     let bytes = bytes.into();
     if bytes <= 0.0 {
         return "0 B".to_string();
