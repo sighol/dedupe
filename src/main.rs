@@ -260,6 +260,38 @@ where
     duplicate_groups
 }
 
+fn find_duplicates_indexes_by<T, F>(cmp: F, files: &[T]) -> Vec<Vec<usize>>
+where
+    T: Eq + Clone + std::fmt::Debug,
+    F: Fn(&T, &T) -> Ordering + Clone,
+{
+    let mut item_references: Vec<&T> = files.iter().collect();
+    item_references.sort_unstable_by(|a, b| cmp(*a, *b));
+    if item_references.is_empty() {
+        return vec![];
+    }
+    let mut duplicate_groups: Vec<Vec<usize>> = vec![];
+    let mut duplicates: Vec<usize> = vec![];
+    for i in 1..item_references.len() {
+        let prev = item_references[i - 1];
+        let next = item_references[i];
+        if cmp(prev, next).is_eq() {
+            if duplicates.is_empty() {
+                duplicates.push(i - 1);
+            }
+            duplicates.push(i);
+        } else if !duplicates.is_empty() {
+            duplicate_groups.push(duplicates);
+            duplicates = vec![];
+        }
+    }
+    if !duplicates.is_empty() {
+        duplicate_groups.push(duplicates);
+    }
+
+    duplicate_groups
+}
+
 fn report_all_duplicated_files(conn: &mut Connection, config: &Config) {
     info!("Finding duplicates by hash");
     let mut files: Vec<_> = fetch(conn)
