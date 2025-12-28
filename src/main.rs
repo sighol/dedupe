@@ -99,7 +99,7 @@ fn add_folder(
     path: &Path,
 ) -> anyhow::Result<Vec<FileRecord>> {
     let mut map = HashMap::new();
-    for file in fetch(conn) {
+    for file in fetch(conn, path) {
         map.insert(file.path.display().to_string(), file);
     }
 
@@ -153,13 +153,13 @@ fn add_folder(
     Ok(files)
 }
 
-fn fetch(conn: &mut Connection) -> Vec<FileRecord> {
+fn fetch(conn: &mut Connection, path: &Path) -> Vec<FileRecord> {
     let mut stmt = conn
-        .prepare("select path, size, hash from files")
+        .prepare("select path, size, hash from files where path LIKE (?1 || '%')")
         .expect("select all files");
 
     let existing_files: Vec<FileRecord> = stmt
-        .query_map([], |row| {
+        .query_map([path.display().to_string()], |row| {
             Ok(FileRecord {
                 path: row.get::<_, String>(0).expect("Should get path").into(),
                 size: row.get(1).expect("should get size"),
