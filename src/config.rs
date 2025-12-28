@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug)]
 pub struct Config {
     pub includes: Vec<PathBuf>,
-    pub excludes: Vec<glob::Pattern>,
     pub exclude_regex: Vec<regex::Regex>,
     pub min_size: u64,
 }
@@ -22,12 +21,6 @@ impl Config {
         }
         if !is_included {
             return false;
-        }
-
-        for exc in self.excludes.iter() {
-            if exc.matches_path(path) {
-                return false;
-            }
         }
 
         for regex in self.exclude_regex.iter() {

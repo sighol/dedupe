@@ -26,9 +26,6 @@ struct Args {
     #[arg(short, long)]
     db_path: Option<PathBuf>,
 
-    #[arg(short, long)]
-    exclude_globs: Vec<String>,
-
     #[arg(short = 'E', long)]
     exclude_regex: Vec<String>,
 
@@ -52,11 +49,6 @@ fn main() -> anyhow::Result<()> {
     };
     let config = Config {
         min_size: args.min_size.unwrap_or(0),
-        excludes: args
-            .exclude_globs
-            .iter()
-            .map(|x| glob::Pattern::new(x).expect("Valid pattern"))
-            .collect(),
         exclude_regex: args
             .exclude_regex
             .iter()
@@ -454,16 +446,7 @@ fn humanize_bytes<T: Into<f64>>(bytes: T) -> String {
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
-
     use crate::{find_duplicates_by, humanize_bytes};
-
-    #[test]
-    fn test_pattern() {
-        let pattern = glob::Pattern::new("**/test/**").unwrap();
-        let path = Path::new("a/b/c/test/a");
-        assert!(pattern.matches_path(path));
-    }
 
     #[test]
     fn test_find_duplicates_by() {
