@@ -208,7 +208,7 @@ fn hash_duplicated_candidates(
         })
         .collect();
 
-    let file_size_to_hash = to_check_hash.iter().fold(0, |agg, x| agg + files[*x].size);
+    let file_size_to_hash = to_check_hash.iter().fold(0, |acc, i| acc + files[*i].size);
 
     info!(
         "Running md5sum on {} duplicated files. Total size: {}",
@@ -288,21 +288,20 @@ where
     duplicate_groups
 }
 
-fn find_duplicates_indexes_by<T, F>(cmp: F, files: &[T]) -> Vec<Vec<usize>>
+fn find_duplicates_indexes_by<T, F>(cmp: F, files: &mut [T]) -> Vec<Vec<usize>>
 where
     T: Eq + Clone + std::fmt::Debug,
     F: Fn(&T, &T) -> Ordering + Clone,
 {
-    let mut item_references: Vec<&T> = files.iter().collect();
-    item_references.sort_unstable_by(|a, b| cmp(*a, *b));
-    if item_references.is_empty() {
+    files.sort_unstable_by(|a, b| cmp(a, b));
+    if files.is_empty() {
         return vec![];
     }
     let mut duplicate_groups: Vec<Vec<usize>> = vec![];
     let mut duplicates: Vec<usize> = vec![];
-    for i in 1..item_references.len() {
-        let prev = item_references[i - 1];
-        let next = item_references[i];
+    for i in 1..files.len() {
+        let prev = &files[i - 1];
+        let next = &files[i];
         if cmp(prev, next).is_eq() {
             if duplicates.is_empty() {
                 duplicates.push(i - 1);
@@ -329,6 +328,10 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
     duplicates.sort_unstable_by_key(|x| x[0].size);
     for duplicate in duplicates {
         let size = duplicate[0].size;
+        let hash = duplicate[0]
+            .hash
+            .clone()
+            .expect("Duplicates have hash values");
         redundant_size += size * (duplicate.len() as i64 - 1);
         println!(
             "\nDuplicated file with size {}",
@@ -337,6 +340,10 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
         let mut scored_file_records = vec![];
         let mut lowest_score = i64::MAX;
         for file_record in duplicate {
+            assert!(
+                file_record.size == size && file_record.hash.as_ref() == Some(&hash),
+                "The hash and size must be identical in all groups."
+            );
             let path_name = file_record.path.display().to_string();
             let score = config.get_score(&path_name);
             scored_file_records.push((file_record, score));
