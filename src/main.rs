@@ -26,7 +26,7 @@ struct Args {
     #[arg(short, long)]
     db_path: Option<PathBuf>,
 
-    #[arg(short = 'E', long)]
+    #[arg(short = 'e', long)]
     exclude_regex: Vec<String>,
 
     /// Exclude files smaller than this file size in bytes.
