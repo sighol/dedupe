@@ -592,6 +592,6 @@ mod test {
 
     #[test]
     fn test_humanize() {
-        assert_eq!("34.5 KiB", humanize_bytes(34_500));
+        assert_eq!("34.5 KB", humanize_bytes(34_500));
     }
 }
