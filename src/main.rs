@@ -339,6 +339,7 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
 
     let mut redundant_size = 0;
     let mut duplicate_groups = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), &mut files);
+    let num_duplicate_groups = duplicate_groups.len();
     duplicate_groups.sort_unstable_by_key(|x| x[0].size);
     let mut to_delete = vec![];
     for duplicate_group in duplicate_groups {
@@ -415,6 +416,10 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
     println!(
         "\nRedundant size: {}",
         humanize_bytes(redundant_size as f64).yellow().bold()
+    );
+    println!(
+        "Number of duplicate groups: {}",
+        num_duplicate_groups.to_string().yellow().bold()
     );
 
     if !to_delete.is_empty() && delete {
