@@ -4,6 +4,8 @@ CLI utility for finding duplicated files.
 
 Bad code quality weekend project to scratch an itch. I think it works, but not tested very well.
 
+**NB**: Use at your own risk.
+
 # Usage
 
 ## Find duplicated files in folder
