@@ -488,7 +488,7 @@ fn report_duplication_status_in_dir(
             .to_string();
         let file_record = &files_by_path
             .get(&path.display().to_string())
-            .expect(&format!("Did not find {path:?}"));
+            .expect(&format!("Did not find {path:?} in db"));
         if file_record.size < config.min_size as i64 {
             ignored_files += 1;
             continue;
