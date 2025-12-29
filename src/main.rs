@@ -425,7 +425,7 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
 fn confirm_and_delete(to_delete: Vec<FileRecord>) {
     let total_size: i64 = to_delete.iter().map(|x| x.size).sum();
     print!(
-        "\nAre you sure you want to delete {} files of total size {}? [y/n]: ",
+        "\nAre you sure you want to delete {} files ({})? [y/n]: ",
         to_delete.len().to_string().bold().yellow(),
         humanize_bytes(total_size as f64).bold().yellow(),
     );
