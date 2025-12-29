@@ -338,26 +338,23 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
     let mut files: Vec<_> = files.into_iter().filter(|x| x.hash.is_some()).collect();
 
     let mut redundant_size = 0;
-    let mut duplicates = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), &mut files);
-    duplicates.sort_unstable_by_key(|x| x[0].size);
+    let mut duplicate_groups = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), &mut files);
+    duplicate_groups.sort_unstable_by_key(|x| x[0].size);
     let mut to_delete = vec![];
-    for duplicate in duplicates {
-        let size = duplicate[0].size;
-        let hash = duplicate[0]
-            .hash
-            .clone()
-            .expect("Duplicates have hash values");
-        redundant_size += size * (duplicate.len() as i64 - 1);
+    for duplicate_group in duplicate_groups {
+        let size = duplicate_group[0].size;
+        let hash = duplicate_group[0].hash.clone().unwrap();
+        redundant_size += size * (duplicate_group.len() as i64 - 1);
         println!(
             "\nDuplicated file with size {}",
             humanize_bytes(size as f64).bold().yellow(),
         );
         let mut scored_file_records = vec![];
         let mut lowest_score = i64::MAX;
-        for file_record in duplicate {
+        for file_record in duplicate_group {
             assert!(
                 file_record.size == size && file_record.hash.as_ref() == Some(&hash),
-                "The hash and size must be identical in all groups."
+                "The hash and size must be identical within the group."
             );
             let path_name = file_record.path.display().to_string();
             let score = config.get_score(&path_name);
@@ -421,24 +418,28 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
     );
 
     if !to_delete.is_empty() && delete {
-        let total_size: i64 = to_delete.iter().map(|x| x.size).sum();
-        print!(
-            "\nAre you sure you want to delete {} files of total size {}? [y/n]: ",
-            to_delete.len().to_string().bold().yellow(),
-            humanize_bytes(total_size as f64).bold().yellow(),
-        );
-        std::io::stdout().flush().unwrap();
-        let mut response = String::new();
-        std::io::stdin()
-            .read_line(&mut response)
-            .expect("Failed to read from stdin");
-        if response.trim().to_lowercase() == "y" {
-            for file in to_delete {
-                print!("- {}", file.path.display());
-                match std::fs::remove_file(&file.path) {
-                    Ok(()) => println!(" {}", "deleted".green()),
-                    Err(e) => println!(" {} {}", "failed to delete".red().bold(), e),
-                }
+        confirm_and_delete(to_delete);
+    }
+}
+
+fn confirm_and_delete(to_delete: Vec<FileRecord>) {
+    let total_size: i64 = to_delete.iter().map(|x| x.size).sum();
+    print!(
+        "\nAre you sure you want to delete {} files of total size {}? [y/n]: ",
+        to_delete.len().to_string().bold().yellow(),
+        humanize_bytes(total_size as f64).bold().yellow(),
+    );
+    std::io::stdout().flush().unwrap();
+    let mut response = String::new();
+    std::io::stdin()
+        .read_line(&mut response)
+        .expect("Failed to read from stdin");
+    if response.trim().to_lowercase() == "y" {
+        for file in to_delete {
+            print!("- {}", file.path.display());
+            match std::fs::remove_file(&file.path) {
+                Ok(()) => println!(" {}", "deleted".green()),
+                Err(e) => println!(" {} {}", "failed to delete".red().bold(), e),
             }
         }
     }
