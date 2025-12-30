@@ -114,7 +114,7 @@ fn main() -> anyhow::Result<()> {
     }
     info!("Found {} files", files.len());
 
-    hash_duplicated_candidates(&mut conn, &mut files)?;
+    files = filter_duplicates(&mut conn, files)?;
 
     if let Some(report_dir) = args.report_dir {
         report_duplication_status_in_dir(&config, files, &report_dir)?;
@@ -212,22 +212,23 @@ fn fetch(conn: &mut Connection, path: &Path) -> Vec<FileRecord> {
     existing_files
 }
 
-fn hash_duplicated_candidates(
+fn filter_duplicates(
     conn: &mut Connection,
-    files: &mut [FileRecord],
-) -> anyhow::Result<()> {
-    info!("Group {} files by size", files.len());
-    let to_check_hash: Vec<usize> = find_duplicates_indexes_by(|a, b| a.size.cmp(&b.size), files)
+    mut files: Vec<FileRecord>,
+) -> anyhow::Result<Vec<FileRecord>> {
+    files = files.into_iter().filter(|x| x.size > 0).collect();
+    files = find_duplicates_by(|a, b| a.size.cmp(&b.size), files)
         .into_iter()
         .flatten()
-        .filter(|i| {
-            // Only compute hash for files that don't have a hash in the db, and files that are not empty.
-            // Duplicated empty files don't count.
-            files[*i].hash.is_none() && files[*i].size > 0
-        })
         .collect();
-
-    let file_size_to_hash = to_check_hash.iter().fold(0, |acc, i| acc + files[*i].size);
+    let mut to_check_hash = vec![];
+    let mut file_size_to_hash = 0;
+    for file in files.iter_mut() {
+        if file.hash.is_none() {
+            file_size_to_hash += file.size;
+            to_check_hash.push(file);
+        }
+    }
 
     info!(
         "Hashing {} duplicated files. Total size: {}",
@@ -249,18 +250,15 @@ fn hash_duplicated_candidates(
     let mut i = 0;
     let mut bytes = 0;
     let mut time = Instant::now();
-    for index in to_check_hash {
-        let file_data: &mut FileRecord = files
-            .get_mut(index)
-            .expect("Could not find index in files array");
-        if let Ok(hash) = compute_xxhash(&file_data.path) {
-            file_data.hash = Some(hash.clone());
+    for file in to_check_hash {
+        if let Ok(hash) = compute_xxhash(&file.path) {
+            file.hash = Some(hash.clone());
             tx.execute(
                 "UPDATE files SET hash = ?1 WHERE path = ?2",
-                params![hash, file_data.path.display().to_string()],
+                params![hash, file.path.display().to_string()],
             )?;
             i += 1;
-            bytes += file_data.size;
+            bytes += file.size;
             if i >= 5_000 || time.elapsed() > Duration::from_secs(5) {
                 log(i, bytes, time.elapsed());
                 tx.commit()?;
@@ -275,10 +273,10 @@ fn hash_duplicated_candidates(
     log(i, bytes, time.elapsed());
     tx.commit()?;
 
-    Ok(())
+    Ok(files)
 }
 
-fn find_duplicates_by<T, F>(cmp: F, files: &mut [T]) -> Vec<Vec<T>>
+fn find_duplicates_by<T, F>(cmp: F, mut files: Vec<T>) -> Vec<Vec<T>>
 where
     T: Eq + Clone + std::fmt::Debug,
     F: Fn(&T, &T) -> Ordering + Clone,
@@ -309,43 +307,12 @@ where
     duplicate_groups
 }
 
-fn find_duplicates_indexes_by<T, F>(cmp: F, files: &mut [T]) -> Vec<Vec<usize>>
-where
-    T: Eq + Clone + std::fmt::Debug,
-    F: Fn(&T, &T) -> Ordering + Clone,
-{
-    files.sort_unstable_by(|a, b| cmp(a, b));
-    if files.is_empty() {
-        return vec![];
-    }
-    let mut duplicate_groups: Vec<Vec<usize>> = vec![];
-    let mut duplicates: Vec<usize> = vec![];
-    for i in 1..files.len() {
-        let prev = &files[i - 1];
-        let next = &files[i];
-        if cmp(prev, next).is_eq() {
-            if duplicates.is_empty() {
-                duplicates.push(i - 1);
-            }
-            duplicates.push(i);
-        } else if !duplicates.is_empty() {
-            duplicate_groups.push(duplicates);
-            duplicates = vec![];
-        }
-    }
-    if !duplicates.is_empty() {
-        duplicate_groups.push(duplicates);
-    }
-
-    duplicate_groups
-}
-
 fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: bool) {
     info!("Finding duplicates by hash");
-    let mut files: Vec<_> = files.into_iter().filter(|x| x.hash.is_some()).collect();
+    let files: Vec<_> = files.into_iter().filter(|x| x.hash.is_some()).collect();
 
     let mut redundant_size = 0;
-    let mut duplicate_groups = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), &mut files);
+    let mut duplicate_groups = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
     let num_duplicate_groups = duplicate_groups.len();
     duplicate_groups.sort_unstable_by_key(|x| x[0].size);
     let mut to_delete = vec![];
@@ -467,8 +434,8 @@ fn report_duplication_status_in_dir(
         .expect("Report dir could not be canonicalized.");
 
     let files_by_hash = {
-        let mut files_with_hash: Vec<_> = files.iter().filter(|x| x.hash.is_some()).collect();
-        let dups = find_duplicates_by(|x, y| x.hash.cmp(&y.hash), &mut files_with_hash);
+        let files_with_hash: Vec<_> = files.iter().filter(|x| x.hash.is_some()).collect();
+        let dups = find_duplicates_by(|x, y| x.hash.cmp(&y.hash), files_with_hash);
         let mut map = HashMap::new();
         for group in dups.into_iter() {
             let hash = group[0].hash.clone().unwrap();
@@ -584,22 +551,22 @@ mod test {
 
     #[test]
     fn test_find_duplicates_by() {
-        let mut values = vec![1, 2, 3, 4];
-        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), &mut values);
+        let values = vec![1, 2, 3, 4];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
         assert_eq!(Vec::<Vec<i32>>::new(), duplicates);
     }
 
     #[test]
     fn test_find_duplicates_by_2() {
-        let mut values = vec![1, 2, 3, 4, 3];
-        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), &mut values);
+        let values = vec![1, 2, 3, 4, 3];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
         assert_eq!(vec![vec![3, 3]], duplicates);
     }
 
     #[test]
     fn test_find_duplicates_all_duplicated() {
-        let mut values = vec![1, 1, 1];
-        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), &mut values);
+        let values = vec![1, 1, 1];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
         assert_eq!(vec![vec![1, 1, 1]], duplicates);
     }
 
