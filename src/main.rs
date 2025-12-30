@@ -545,7 +545,7 @@ fn report_duplication_status_in_dir(
 fn compute_xxhash(path: &Path) -> anyhow::Result<String> {
     let mut hash = XxHash64::with_seed(0);
     let mut file = File::open(path)?;
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; 4096];
 
     loop {
         let count = file.read(&mut buffer)?;
