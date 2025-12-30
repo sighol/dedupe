@@ -10,10 +10,12 @@ use rusqlite::{Connection, params};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::hash::Hasher;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tracing::info;
+use twox_hash::XxHash64;
 use walkdir::WalkDir;
 
 use crate::config::Score;
@@ -225,16 +227,18 @@ fn hash_duplicated_candidates(
     let file_size_to_hash = to_check_hash.iter().fold(0, |acc, i| acc + files[*i].size);
 
     info!(
-        "Running md5sum on {} duplicated files. Total size: {}",
+        "Hashing {} duplicated files. Total size: {}",
         to_check_hash.len(),
         humanize_bytes(file_size_to_hash as f64)
     );
 
-    fn log(count: usize, bytes: i64) {
+    fn log(count: usize, bytes: i64, duration: Duration) {
+        let bytes_per_second = (bytes as f64) / duration.as_secs_f64();
         info!(
-            "Computed hash for {} files. Total size: {}",
+            "Hashed {} files, {:>8}, {:>8}/s",
             count,
-            humanize_bytes(bytes as f64)
+            humanize_bytes(bytes as f64),
+            humanize_bytes(bytes_per_second),
         );
     }
 
@@ -246,7 +250,7 @@ fn hash_duplicated_candidates(
         let file_data: &mut FileRecord = files
             .get_mut(index)
             .expect("Could not find index in files array");
-        if let Ok(hash) = compute_md5(&file_data.path) {
+        if let Ok(hash) = compute_xxhash(&file_data.path) {
             file_data.hash = Some(hash.clone());
             tx.execute(
                 "UPDATE files SET hash = ?1 WHERE path = ?2",
@@ -255,7 +259,7 @@ fn hash_duplicated_candidates(
             i += 1;
             bytes += file_data.size;
             if i >= 5_000 || time.elapsed() > Duration::from_secs(5) {
-                log(i, bytes);
+                log(i, bytes, time.elapsed());
                 tx.commit()?;
                 tx = conn.transaction()?;
                 i = 0;
@@ -265,7 +269,7 @@ fn hash_duplicated_candidates(
         }
     }
 
-    log(i, bytes);
+    log(i, bytes, time.elapsed());
     tx.commit()?;
 
     Ok(())
@@ -538,9 +542,9 @@ fn report_duplication_status_in_dir(
     Ok(())
 }
 
-fn compute_md5(path: &Path) -> io::Result<String> {
+fn compute_xxhash(path: &Path) -> anyhow::Result<String> {
+    let mut hash = XxHash64::with_seed(0);
     let mut file = File::open(path)?;
-    let mut context = md5::Context::new();
     let mut buffer = [0; 1024];
 
     loop {
@@ -548,10 +552,10 @@ fn compute_md5(path: &Path) -> io::Result<String> {
         if count == 0 {
             break;
         }
-        context.consume(&buffer[..count]);
+        hash.write(&buffer[..count]);
     }
 
-    Ok(format!("{:x}", context.finalize()))
+    Ok(format!("{:x}", hash.finish()))
 }
 
 fn humanize_bytes<T: Into<f64>>(bytes: T) -> String {
@@ -573,7 +577,7 @@ fn humanize_bytes<T: Into<f64>>(bytes: T) -> String {
 
 #[cfg(test)]
 mod test {
-    use crate::{find_duplicates_by, humanize_bytes};
+    use crate::*;
 
     #[test]
     fn test_find_duplicates_by() {
