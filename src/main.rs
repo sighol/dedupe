@@ -114,7 +114,9 @@ fn main() -> anyhow::Result<()> {
     }
     info!("Found {} files", files.len());
 
-    files = filter_duplicates(&mut conn, files)?;
+    files = files.into_iter().filter(|x| x.size > 0).collect();
+    files = filter_duplicates(&mut conn, files, HashStep::Hash4096)?;
+    files = filter_duplicates(&mut conn, files, HashStep::Hash)?;
 
     if let Some(report_dir) = args.report_dir {
         report_duplication_status_in_dir(&config, &report_dir, files)?;
@@ -212,19 +214,50 @@ fn fetch(conn: &mut Connection, path: &Path) -> Vec<FileRecord> {
     existing_files
 }
 
+#[derive(Debug)]
+enum HashStep {
+    Hash4096,
+    Hash,
+}
+
+impl HashStep {
+    fn column_name(&self) -> &'static str {
+        match self {
+            HashStep::Hash4096 => "hash_4096",
+            HashStep::Hash => "hash",
+        }
+    }
+}
+
 fn filter_duplicates(
     conn: &mut Connection,
     mut files: Vec<FileRecord>,
+    step: HashStep,
 ) -> anyhow::Result<Vec<FileRecord>> {
-    files = files.into_iter().filter(|x| x.size > 0).collect();
-    files = find_duplicates_by(|a, b| a.size.cmp(&b.size), files)
-        .into_iter()
-        .flatten()
-        .collect();
+    files = {
+        let duplicate_groups = match step {
+            HashStep::Hash4096 => find_duplicates_by(
+                |a, b| a.size.cmp(&b.size),
+                files.into_iter().filter(|x| x.size > 0).collect(),
+            ),
+            HashStep::Hash => find_duplicates_by(
+                |a, b| a.hash_4096.cmp(&b.hash_4096),
+                files
+                    .into_iter()
+                    .filter(|x| x.hash_4096.is_some())
+                    .collect(),
+            ),
+        };
+        duplicate_groups.into_iter().flatten().collect()
+    };
     let mut to_check_hash = vec![];
     let mut file_size_to_hash = 0;
     for file in files.iter_mut() {
-        if file.hash.is_none() {
+        let should_include = match step {
+            HashStep::Hash4096 => file.hash_4096.is_none(),
+            HashStep::Hash => file.hash.is_none(),
+        };
+        if should_include {
             file_size_to_hash += file.size;
             to_check_hash.push(file);
         }
@@ -251,10 +284,20 @@ fn filter_duplicates(
     let mut bytes = 0;
     let mut time = Instant::now();
     for file in to_check_hash {
-        if let Ok(hash) = compute_xxhash(&file.path) {
-            file.hash = Some(hash.clone());
+        let hash = match step {
+            HashStep::Hash4096 => compute_xxhash_4096(&file.path),
+            HashStep::Hash => compute_xxhash(&file.path),
+        };
+        if let Ok(hash) = hash {
+            match step {
+                HashStep::Hash4096 => file.hash_4096 = Some(hash.clone()),
+                HashStep::Hash => file.hash = Some(hash.clone()),
+            }
             tx.execute(
-                "UPDATE files SET hash = ?1 WHERE path = ?2",
+                &format!(
+                    "UPDATE files SET {} = ?1 WHERE path = ?2",
+                    step.column_name()
+                ),
                 params![hash, file.path.display().to_string()],
             )?;
             i += 1;
@@ -512,6 +555,19 @@ fn report_duplication_status_in_dir(
     Ok(())
 }
 
+fn compute_xxhash_4096(path: &Path) -> anyhow::Result<String> {
+    let mut hash = XxHash64::with_seed(0);
+    let mut file = File::open(path)?;
+    let mut buffer = [0; 4096];
+
+    let count = file.read(&mut buffer)?;
+    if count != 0 {
+        hash.write(&buffer[..count]);
+    }
+
+    Ok(format!("{:x}", hash.finish()))
+}
+
 fn compute_xxhash(path: &Path) -> anyhow::Result<String> {
     let mut hash = XxHash64::with_seed(0);
     let mut file = File::open(path)?;
@@ -527,7 +583,6 @@ fn compute_xxhash(path: &Path) -> anyhow::Result<String> {
 
     Ok(format!("{:x}", hash.finish()))
 }
-
 fn humanize_bytes<T: Into<f64>>(bytes: T) -> String {
     let suffixes = ["B", "KB", "MB", "GB", "TB", "PB"];
     let bytes = bytes.into();
