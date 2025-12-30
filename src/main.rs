@@ -100,6 +100,7 @@ fn main() -> anyhow::Result<()> {
         "CREATE TABLE IF NOT EXISTS files (
             path TEXT NOT NULL PRIMARY KEY,
             size INTEGER NOT NULL,
+            hash_4096 TEXT,
             hash TEXT
         )",
         [],
@@ -161,6 +162,7 @@ fn add_folder(
                 let file_record = FileRecord {
                     path: path.to_owned(),
                     size: size as i64,
+                    hash_4096: None,
                     hash: None,
                 };
                 files.push(file_record);
@@ -192,7 +194,7 @@ fn add_folder(
 
 fn fetch(conn: &mut Connection, path: &Path) -> Vec<FileRecord> {
     let mut stmt = conn
-        .prepare("select path, size, hash from files where path LIKE (?1 || '/%')")
+        .prepare("select path, size, hash_4096, hash from files where path LIKE (?1 || '/%')")
         .expect("select all files");
 
     let existing_files: Vec<FileRecord> = stmt
@@ -200,7 +202,8 @@ fn fetch(conn: &mut Connection, path: &Path) -> Vec<FileRecord> {
             Ok(FileRecord {
                 path: row.get::<_, String>(0).expect("Should get path").into(),
                 size: row.get(1).expect("should get size"),
-                hash: row.get(2).ok(),
+                hash_4096: row.get(2).ok(),
+                hash: row.get(3).ok(),
             })
         })
         .unwrap()
