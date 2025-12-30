@@ -117,7 +117,7 @@ fn main() -> anyhow::Result<()> {
     files = filter_duplicates(&mut conn, files)?;
 
     if let Some(report_dir) = args.report_dir {
-        report_duplication_status_in_dir(&config, files, &report_dir)?;
+        report_duplication_status_in_dir(&config, &report_dir, files)?;
     } else {
         report_all_duplicated_files(&config, files, args.delete);
     }
@@ -426,8 +426,8 @@ fn confirm_and_delete(to_delete: Vec<FileRecord>) {
 
 fn report_duplication_status_in_dir(
     config: &Config,
-    files: Vec<FileRecord>,
     report_dir: &Path,
+    files: Vec<FileRecord>,
 ) -> anyhow::Result<()> {
     let report_dir = report_dir
         .canonicalize()
