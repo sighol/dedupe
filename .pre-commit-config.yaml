@@ -1,0 +1,28 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files # Prevent giant files from being committed (default=500kB)
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-toml
+  - repo: local
+    hooks:
+      - id: clippy
+        name: cargo-clippy
+        entry: cargo clippy
+        pass_filenames: false
+        types: [rust]
+        language: system
+      - id: fmt
+        name: cargo fmt
+        entry: cargo fmt
+        pass_filenames: false
+        types: [rust]
+        language: system
+      - id: test
+        name: cargo test
+        entry: cargo test
+        pass_filenames: false
+        types: [rust]
+        language: system
