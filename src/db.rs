@@ -58,7 +58,7 @@ impl FilesTransaction<'_> {
     pub fn insert(&mut self, file: &FileRecord) -> anyhow::Result<i32> {
         self.tx.execute(
             "INSERT INTO files (path, size) VALUES (?1, ?2)",
-            params![file.path_name(), file.size as i64],
+            params![file.path_name(), { file.size }],
         )?;
         self.num_commands += 1;
         Ok(self.num_commands)

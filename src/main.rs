@@ -137,7 +137,7 @@ fn add_folder(
     for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             let path = entry.path();
-            if !config.is_included(&path) {
+            if !config.is_included(path) {
                 continue;
             }
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
@@ -349,7 +349,7 @@ fn report_duplication_status_in_dir(
         let path = entry.path();
         if path.is_dir() {
             continue;
-        } else if !config.is_included(&path) {
+        } else if !config.is_included(path) {
             ignored_files += 1;
             continue;
         }
@@ -360,7 +360,7 @@ fn report_duplication_status_in_dir(
             .to_string();
         let file_record = &files_by_path
             .get(&path.display().to_string())
-            .expect(&format!("Did not find {path:?} in db"));
+            .unwrap_or_else(|| panic!("Did not find {path:?} in db"));
         if file_record.size < config.min_size as i64 {
             ignored_files += 1;
             continue;

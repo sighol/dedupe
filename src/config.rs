@@ -26,7 +26,7 @@ impl Config {
         }
 
         for regex in self.exclude_regex.iter() {
-            if path.to_str().map_or(false, |s| regex.is_match(s)) {
+            if path.to_str().is_some_and(|s| regex.is_match(s)) {
                 return false;
             }
         }
@@ -40,7 +40,7 @@ impl Config {
                 return Some(score.score);
             }
         }
-        return None;
+        None
     }
 }
 

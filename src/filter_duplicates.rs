@@ -13,7 +13,7 @@ use tracing::info;
 use twox_hash::XxHash64;
 
 pub fn step1(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<FileRecord>> {
-    files = files.into_iter().filter(|x| x.size > 0).collect();
+    files.retain(|x| x.size > 0);
     files = find_duplicates_by(|a, b| a.size.cmp(&b.size), files)
         .into_iter()
         .flatten()
@@ -53,10 +53,7 @@ pub fn step1(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<Fi
 }
 
 pub fn step2(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<FileRecord>> {
-    files = files
-        .into_iter()
-        .filter(|f| f.hash_4096.is_some())
-        .collect();
+    files.retain(|f| f.hash_4096.is_some());
     files = find_duplicates_by(|a, b| a.hash_4096.cmp(&b.hash_4096), files)
         .into_iter()
         .flatten()
