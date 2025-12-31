@@ -2,7 +2,7 @@
 
 CLI utility for finding duplicated files.
 
-Bad code quality weekend project to scratch an itch. I think it works, but not tested very well.
+Weekend project to scratch an itch. I think it works, but not tested very well.
 
 **NB**: Use at your own risk.
 
@@ -15,6 +15,8 @@ dedupe FOLDER1 FOLDER2
 ```
 
 ## Cache hash values
+
+This speeds up the program greatly.
 
 ```shell
 dedupe --db-path cache.db FOLDER1 FOLDER2
@@ -31,7 +33,7 @@ duplicates from other places in FOLDER1 and FOLDER2.
 
 ## Automatic cleanup by adding a score to each file
 
-Add scoring of files based on the file name. To add a score:
+Add scoring of files based on the file path. To add a score:
 
 ```shell
 dedupe FOLDER1 FOLDER2 --score=50=MY_REGEX --score=100=MY_OTHER_REGEX
@@ -66,19 +68,3 @@ Then `path3` and `path4` will be deleted. If the program is run again, it will t
 
 The file paths, sizes, and hash values are optionally stored in a sqlite3 database if `--db-path` is
 set.
-
-# TODO
-
-## Clean up CLI interface
-
-It feels a bit messy. Maybe group something into sub-commands.
-
-Maybe something like:
-
-```shell
-dedupe duplicates FOLDER1 FOLDER2
-dedupe delete-duplicates (--force) FOLDER1 FOLDER2
-dedupe check-folder FOLDER1 FOLDER2
-```
-
-Doesn't feel amazing that one either.
