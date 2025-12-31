@@ -13,12 +13,9 @@ use file_record::FileRecord;
 use rusqlite::Connection;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fs::File;
-use std::hash::Hasher;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use tracing::info;
-use twox_hash::XxHash64;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
@@ -417,34 +414,6 @@ fn report_duplication_status_in_dir(
     Ok(())
 }
 
-fn compute_xxhash_4096(path: &Path) -> anyhow::Result<String> {
-    let mut hash = XxHash64::with_seed(0);
-    let mut file = File::open(path)?;
-    let mut buffer = [0; 4096];
-
-    let count = file.read(&mut buffer)?;
-    if count != 0 {
-        hash.write(&buffer[..count]);
-    }
-
-    Ok(format!("{:x}", hash.finish()))
-}
-
-fn compute_xxhash(path: &Path) -> anyhow::Result<String> {
-    let mut hash = XxHash64::with_seed(0);
-    let mut file = File::open(path)?;
-    let mut buffer = [0; 4096];
-
-    loop {
-        let count = file.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        hash.write(&buffer[..count]);
-    }
-
-    Ok(format!("{:x}", hash.finish()))
-}
 fn humanize_bytes<T: Into<f64>>(bytes: T) -> String {
     let suffixes = ["B", "KB", "MB", "GB", "TB", "PB"];
     let bytes = bytes.into();
