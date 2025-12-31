@@ -19,6 +19,9 @@ pub fn step1(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<Fi
         .flatten()
         .collect();
     let to_check_hash: Vec<_> = files.iter_mut().filter(|x| x.hash_4096.is_none()).collect();
+    if to_check_hash.is_empty() {
+        return Ok(files);
+    }
     info!(
         "[short] Hashing first 4096 bytes of {} files",
         to_check_hash.len()
@@ -65,6 +68,9 @@ pub fn step2(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<Fi
             file_size_to_hash += file.size;
             to_check_hash.push(file);
         }
+    }
+    if to_check_hash.is_empty() {
+        return Ok(files);
     }
 
     info!(
