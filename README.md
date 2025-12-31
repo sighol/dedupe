@@ -14,6 +14,12 @@ Bad code quality weekend project to scratch an itch. I think it works, but not t
 dedupe FOLDER1 FOLDER2
 ```
 
+## Cache hash values
+
+```shell
+dedupe --db-path cache.db FOLDER1 FOLDER2
+```
+
 ## Check if folder only contains duplicates
 
 ```shell
@@ -52,6 +58,9 @@ dedupe FOLDER1 FOLDER2 --score=50=MY_REGEX --score=100=MY_OTHER_REGEX --delete
 5. Retain the files that are duplicated by the hash of the first 4096 bytes.
 6. Hash the full content of the files.
 7. Group by the full hash and report duplicates.
+
+The file paths, sizes, and hash values are optionally stored in a sqlite3 database if `--db-path` is
+set.
 
 # TODO
 
