@@ -125,12 +125,13 @@ fn add_folder(
     for file in db::fetch(conn, path) {
         map.insert(file.path.display().to_string(), file);
     }
-    info!(
-        "Found {} files in the db cache starting at path {}",
-        map.len(),
-        path.display()
-    );
-
+    if map.len() > 0 {
+        info!(
+            "Found {} files in the db cache starting at path {}",
+            map.len(),
+            path.display()
+        );
+    }
     info!("Scanning files in '{}'", path.display());
     let mut tx = FilesTransaction::begin(conn)?;
     let mut files = vec![];
