@@ -316,9 +316,10 @@ fn report_duplication_status_in_dir(
     for entry in WalkDir::new(&report_dir).sort_by_file_name() {
         let entry = entry?;
         let path = entry.path();
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
         if path.is_dir() {
             continue;
-        } else if !config.is_included(path) {
+        } else if size == 0 || size < config.min_size || !config.is_included(path) {
             ignored_files += 1;
             continue;
         }
