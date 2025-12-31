@@ -34,7 +34,7 @@ pub fn step1(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<Fi
         if let Ok(hash) = compute_xxhash_4096(&file.path) {
             file.hash_4096 = Some(hash.clone());
             if file.size <= 4096 {
-                file.hash = Some(hash.clone());
+                file.hash = Some(hash);
             }
             let num_updated = tx.update(file)?;
             if num_updated >= 15_000 || time.elapsed() > Duration::from_secs(5) {
@@ -91,7 +91,7 @@ pub fn step2(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<Fi
     let mut time = Instant::now();
     for file in to_check_hash {
         if let Ok(hash) = compute_xxhash(&file.path) {
-            file.hash = Some(hash.clone());
+            file.hash = Some(hash);
             let num_updated = tx.update(file)?;
             bytes += file.size;
             if num_updated >= 5_000 || time.elapsed() > Duration::from_secs(5) {
