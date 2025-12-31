@@ -31,10 +31,7 @@ duplicates from other places in FOLDER1 and FOLDER2.
 
 ## Automatic cleanup by adding a score to each file
 
-Add scoring of files based on the file name. For a duplication group, it only keeps the file with the
-highest scoring file name, and delete the rest.
-
-To add a score:
+Add scoring of files based on the file name. To add a score:
 
 ```shell
 dedupe FOLDER1 FOLDER2 --score=50=MY_REGEX --score=100=MY_OTHER_REGEX
@@ -48,6 +45,14 @@ To perform deletion:
 ```shell
 dedupe FOLDER1 FOLDER2 --score=50=MY_REGEX --score=100=MY_OTHER_REGEX --delete
 ```
+
+If a file is duplicated four times with the following scores:
+- path1: score=3
+- path2: score=2
+- path3: score=1
+- path4: score=1
+
+Then `path3` and `path4` will be deleted. If the program is run again, it will then delete `path2`.
 
 ## How it works
 
