@@ -112,9 +112,8 @@ fn main() -> anyhow::Result<()> {
             files.push(f);
         }
     }
-    info!("Found {} files", files.len());
+    info!("Found {} files in search folders", files.len());
 
-    files = files.into_iter().filter(|x| x.size > 0).collect();
     files = filter_duplicates(&mut conn, files, HashStep::Hash4096)?;
     files = filter_duplicates(&mut conn, files, HashStep::Hash)?;
 
@@ -214,7 +213,7 @@ fn fetch(conn: &mut Connection, path: &Path) -> Vec<FileRecord> {
     existing_files
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum HashStep {
     Hash4096,
     Hash,
@@ -225,6 +224,13 @@ impl HashStep {
         match self {
             HashStep::Hash4096 => "hash_4096",
             HashStep::Hash => "hash",
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            HashStep::Hash4096 => "short",
+            HashStep::Hash => "full",
         }
     }
 }
@@ -253,26 +259,34 @@ fn filter_duplicates(
     let mut to_check_hash = vec![];
     let mut file_size_to_hash = 0;
     for file in files.iter_mut() {
-        let should_include = match step {
-            HashStep::Hash4096 => file.hash_4096.is_none(),
-            HashStep::Hash => file.hash.is_none(),
+        match step {
+            HashStep::Hash4096 => {
+                if file.hash_4096.is_none() {
+                    file_size_to_hash += file.size.min(4096);
+                    to_check_hash.push(file);
+                }
+            }
+            HashStep::Hash => {
+                if file.hash.is_none() {
+                    file_size_to_hash += file.size;
+                    to_check_hash.push(file);
+                }
+            }
         };
-        if should_include {
-            file_size_to_hash += file.size;
-            to_check_hash.push(file);
-        }
     }
 
     info!(
-        "Hashing {} duplicated files. Total size: {}",
+        "[{}] Hashing {} duplicated files. Total size: {}",
+        step.describe(),
         to_check_hash.len(),
         humanize_bytes(file_size_to_hash as f64)
     );
 
-    fn log(count: usize, bytes: i64, duration: Duration) {
+    fn log(step: HashStep, count: usize, bytes: i64, duration: Duration) {
         let bytes_per_second = (bytes as f64) / duration.as_secs_f64();
         info!(
-            "Hashed {} files, {:>8}, {:>8}/s",
+            "[{}] Hashed {:>4} files, {:>8}, {:>8}/s",
+            step.describe(),
             count,
             humanize_bytes(bytes as f64),
             humanize_bytes(bytes_per_second),
@@ -290,7 +304,12 @@ fn filter_duplicates(
         };
         if let Ok(hash) = hash {
             match step {
-                HashStep::Hash4096 => file.hash_4096 = Some(hash.clone()),
+                HashStep::Hash4096 => {
+                    file.hash_4096 = Some(hash.clone());
+                    if file.size <= 4096 {
+                        file.hash = Some(hash.clone());
+                    }
+                }
                 HashStep::Hash => file.hash = Some(hash.clone()),
             }
             tx.execute(
@@ -301,9 +320,12 @@ fn filter_duplicates(
                 params![hash, file.path.display().to_string()],
             )?;
             i += 1;
-            bytes += file.size;
+            bytes += match step {
+                HashStep::Hash4096 => file.size.min(4096),
+                HashStep::Hash => file.size,
+            };
             if i >= 5_000 || time.elapsed() > Duration::from_secs(5) {
-                log(i, bytes, time.elapsed());
+                log(step, i, bytes, time.elapsed());
                 tx.commit()?;
                 tx = conn.transaction()?;
                 i = 0;
@@ -313,7 +335,7 @@ fn filter_duplicates(
         }
     }
 
-    log(i, bytes, time.elapsed());
+    log(step, i, bytes, time.elapsed());
     tx.commit()?;
 
     Ok(files)
