@@ -1,24 +1,25 @@
 mod config;
+mod db;
 mod file_record;
+mod filter_duplicates;
 
+use crate::config::Score;
+use crate::db::FilesTransaction;
 use anyhow::Context;
 use clap::Parser;
 use colored::Colorize;
 use config::Config;
 use file_record::FileRecord;
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hasher;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 use tracing::info;
 use twox_hash::XxHash64;
 use walkdir::WalkDir;
-
-use crate::config::Score;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "A tool to find duplicated files.")]
@@ -96,6 +97,8 @@ fn main() -> anyhow::Result<()> {
             .collect(),
     };
 
+    conn.execute("pragma synchronous = off; ", [])?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS files (
             path TEXT NOT NULL PRIMARY KEY,
@@ -114,8 +117,8 @@ fn main() -> anyhow::Result<()> {
     }
     info!("Found {} files in search folders", files.len());
 
-    files = filter_duplicates(&mut conn, files, HashStep::Hash4096)?;
-    files = filter_duplicates(&mut conn, files, HashStep::Hash)?;
+    files = filter_duplicates::step1(&mut conn, files)?;
+    files = filter_duplicates::step2(&mut conn, files)?;
 
     if let Some(report_dir) = args.report_dir {
         report_duplication_status_in_dir(&config, &report_dir, files)?;
@@ -132,7 +135,7 @@ fn add_folder(
     path: &Path,
 ) -> anyhow::Result<Vec<FileRecord>> {
     let mut map = HashMap::new();
-    for file in fetch(conn, path) {
+    for file in db::fetch(conn, path) {
         map.insert(file.path.display().to_string(), file);
     }
     info!(
@@ -142,13 +145,11 @@ fn add_folder(
     );
 
     info!("Scanning files in '{}'", path.display());
-    let mut tx = conn.transaction()?;
-    let mut i = 0;
+    let mut tx = FilesTransaction::begin(conn)?;
     let mut files = vec![];
     for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             let path = entry.path();
-            let path_name = path.display().to_string();
             if !config.is_included(&path) {
                 continue;
             }
@@ -157,6 +158,7 @@ fn add_folder(
                 continue;
             }
 
+            let path_name = path.display().to_string();
             if let Some(existing) = map.get(&path_name) {
                 files.push(existing.clone());
             } else {
@@ -166,178 +168,16 @@ fn add_folder(
                     hash_4096: None,
                     hash: None,
                 };
+                let num_inserts = tx.insert(&file_record)?;
+                if num_inserts >= 10_000 {
+                    tx.commit()?;
+                    tx = FilesTransaction::begin(conn)?;
+                }
                 files.push(file_record);
-
-                tx.execute(
-                    "INSERT INTO files (path, size) VALUES (?1, ?2)",
-                    params![path_name, size as i64],
-                )
-                .context(format!(
-                    "Failed to insert {}, {}",
-                    &path_name,
-                    path.display()
-                ))?;
-                i += 1;
-
-                if i >= 10_000 {
-                    info!("Adding {} files", i);
-                    i = 0;
-                    tx.commit().unwrap();
-                    tx = conn.transaction().unwrap();
-                }
             }
         }
     }
-    info!("Adding {} files", i);
-    tx.commit().unwrap();
-    Ok(files)
-}
-
-fn fetch(conn: &mut Connection, path: &Path) -> Vec<FileRecord> {
-    let mut stmt = conn
-        .prepare("select path, size, hash_4096, hash from files where path LIKE (?1 || '/%')")
-        .expect("select all files");
-
-    let existing_files: Vec<FileRecord> = stmt
-        .query_map([path.display().to_string()], |row| {
-            Ok(FileRecord {
-                path: row.get::<_, String>(0).expect("Should get path").into(),
-                size: row.get(1).expect("should get size"),
-                hash_4096: row.get(2).ok(),
-                hash: row.get(3).ok(),
-            })
-        })
-        .unwrap()
-        .flatten()
-        .collect();
-    existing_files
-}
-
-#[derive(Debug, Clone, Copy)]
-enum HashStep {
-    Hash4096,
-    Hash,
-}
-
-impl HashStep {
-    fn column_name(&self) -> &'static str {
-        match self {
-            HashStep::Hash4096 => "hash_4096",
-            HashStep::Hash => "hash",
-        }
-    }
-
-    fn describe(&self) -> &'static str {
-        match self {
-            HashStep::Hash4096 => "short",
-            HashStep::Hash => "full",
-        }
-    }
-}
-
-fn filter_duplicates(
-    conn: &mut Connection,
-    mut files: Vec<FileRecord>,
-    step: HashStep,
-) -> anyhow::Result<Vec<FileRecord>> {
-    files = {
-        let duplicate_groups = match step {
-            HashStep::Hash4096 => find_duplicates_by(
-                |a, b| a.size.cmp(&b.size),
-                files.into_iter().filter(|x| x.size > 0).collect(),
-            ),
-            HashStep::Hash => find_duplicates_by(
-                |a, b| a.hash_4096.cmp(&b.hash_4096),
-                files
-                    .into_iter()
-                    .filter(|x| x.hash_4096.is_some())
-                    .collect(),
-            ),
-        };
-        duplicate_groups.into_iter().flatten().collect()
-    };
-    let mut to_check_hash = vec![];
-    let mut file_size_to_hash = 0;
-    for file in files.iter_mut() {
-        match step {
-            HashStep::Hash4096 => {
-                if file.hash_4096.is_none() {
-                    file_size_to_hash += file.size.min(4096);
-                    to_check_hash.push(file);
-                }
-            }
-            HashStep::Hash => {
-                if file.hash.is_none() {
-                    file_size_to_hash += file.size;
-                    to_check_hash.push(file);
-                }
-            }
-        };
-    }
-
-    info!(
-        "[{}] Hashing {} duplicated files. Total size: {}",
-        step.describe(),
-        to_check_hash.len(),
-        humanize_bytes(file_size_to_hash as f64)
-    );
-
-    fn log(step: HashStep, count: usize, bytes: i64, duration: Duration) {
-        let bytes_per_second = (bytes as f64) / duration.as_secs_f64();
-        info!(
-            "[{}] Hashed {:>4} files, {:>8}, {:>8}/s",
-            step.describe(),
-            count,
-            humanize_bytes(bytes as f64),
-            humanize_bytes(bytes_per_second),
-        );
-    }
-
-    let mut tx = conn.transaction()?;
-    let mut i = 0;
-    let mut bytes = 0;
-    let mut time = Instant::now();
-    for file in to_check_hash {
-        let hash = match step {
-            HashStep::Hash4096 => compute_xxhash_4096(&file.path),
-            HashStep::Hash => compute_xxhash(&file.path),
-        };
-        if let Ok(hash) = hash {
-            match step {
-                HashStep::Hash4096 => {
-                    file.hash_4096 = Some(hash.clone());
-                    if file.size <= 4096 {
-                        file.hash = Some(hash.clone());
-                    }
-                }
-                HashStep::Hash => file.hash = Some(hash.clone()),
-            }
-            tx.execute(
-                &format!(
-                    "UPDATE files SET {} = ?1 WHERE path = ?2",
-                    step.column_name()
-                ),
-                params![hash, file.path.display().to_string()],
-            )?;
-            i += 1;
-            bytes += match step {
-                HashStep::Hash4096 => file.size.min(4096),
-                HashStep::Hash => file.size,
-            };
-            if i >= 5_000 || time.elapsed() > Duration::from_secs(5) {
-                log(step, i, bytes, time.elapsed());
-                tx.commit()?;
-                tx = conn.transaction()?;
-                i = 0;
-                time = Instant::now();
-                bytes = 0;
-            }
-        }
-    }
-
-    log(step, i, bytes, time.elapsed());
     tx.commit()?;
-
     Ok(files)
 }
 
