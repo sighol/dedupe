@@ -5,6 +5,22 @@ use rusqlite::Transaction;
 use rusqlite::params;
 use std::path::Path;
 
+pub fn setup(conn: &mut Connection) -> Result<()> {
+    conn.execute("pragma synchronous = off; ", [])?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS files (
+            path TEXT NOT NULL PRIMARY KEY,
+            size INTEGER NOT NULL,
+            hash_4096 TEXT,
+            hash TEXT
+        )",
+        [],
+    )?;
+
+    Ok(())
+}
+
 pub struct FilesTransaction<'a> {
     tx: Transaction<'a>,
     pub num_commands: i32,

@@ -71,6 +71,8 @@ fn main() -> anyhow::Result<()> {
         Some(path) => Connection::open(&path)?,
         None => Connection::open_in_memory()?,
     };
+    db::setup(&mut conn)?;
+
     let config = Config {
         min_size: args.min_size.unwrap_or(0),
         exclude_regex: args
@@ -93,18 +95,6 @@ fn main() -> anyhow::Result<()> {
             .map(|x| Score::parse(x).expect("Bad score"))
             .collect(),
     };
-
-    conn.execute("pragma synchronous = off; ", [])?;
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS files (
-            path TEXT NOT NULL PRIMARY KEY,
-            size INTEGER NOT NULL,
-            hash_4096 TEXT,
-            hash TEXT
-        )",
-        [],
-    )?;
 
     let mut files = vec![];
     for dir in config.includes.iter() {
