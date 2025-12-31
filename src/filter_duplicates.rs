@@ -1,9 +1,9 @@
 use crate::db::FilesTransaction;
 use crate::file_record::FileRecord;
-use crate::find_duplicates_by;
 use crate::humanize_bytes;
 use anyhow::Result;
 use rusqlite::Connection;
+use std::cmp::Ordering;
 use std::fs::File;
 use std::hash::Hasher;
 use std::io::Read;
@@ -107,6 +107,36 @@ pub fn step2(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<Fi
     Ok(files)
 }
 
+pub fn find_duplicates_by<T, F>(cmp: F, mut files: Vec<T>) -> Vec<Vec<T>>
+where
+    T: Eq + Clone + std::fmt::Debug,
+    F: Fn(&T, &T) -> Ordering + Clone,
+{
+    files.sort_unstable_by(cmp.clone());
+    if files.is_empty() {
+        return vec![];
+    }
+    let mut duplicate_groups: Vec<Vec<T>> = vec![];
+    let mut duplicates: Vec<T> = vec![];
+    for i in 1..files.len() {
+        let prev = &files[i - 1];
+        let next = &files[i];
+        if cmp(prev, next).is_eq() {
+            if duplicates.is_empty() {
+                duplicates.push(prev.clone());
+            }
+            duplicates.push(next.clone());
+        } else if !duplicates.is_empty() {
+            duplicate_groups.push(duplicates);
+            duplicates = vec![];
+        }
+    }
+    if !duplicates.is_empty() {
+        duplicate_groups.push(duplicates);
+    }
+
+    duplicate_groups
+}
 fn compute_xxhash_4096(path: &Path) -> anyhow::Result<String> {
     let mut hash = XxHash64::with_seed(0);
     let mut file = File::open(path)?;
@@ -134,4 +164,30 @@ fn compute_xxhash(path: &Path) -> anyhow::Result<String> {
     }
 
     Ok(format!("{:x}", hash.finish()))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_find_duplicates_by() {
+        let values = vec![1, 2, 3, 4];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
+        assert_eq!(Vec::<Vec<i32>>::new(), duplicates);
+    }
+
+    #[test]
+    fn test_find_duplicates_by_2() {
+        let values = vec![1, 2, 3, 4, 3];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
+        assert_eq!(vec![vec![3, 3]], duplicates);
+    }
+
+    #[test]
+    fn test_find_duplicates_all_duplicated() {
+        let values = vec![1, 1, 1];
+        let duplicates = find_duplicates_by(|a, b| a.cmp(&b), values);
+        assert_eq!(vec![vec![1, 1, 1]], duplicates);
+    }
 }
