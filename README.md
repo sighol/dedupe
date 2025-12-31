@@ -43,6 +43,16 @@ To perform deletion:
 dedupe FOLDER1 FOLDER2 --score=50=MY_REGEX --score=100=MY_OTHER_REGEX --delete
 ```
 
+## How it works
+
+1. Iterate through the directories recursively and retrieves file paths and file sizes.
+2. Remove files that are empty. All empty files are duplicate anyway.
+3. Find and retain the files that are duplicated by size.
+4. Hash the first 4096 bytes of the files.
+5. Retain the files that are duplicated by the hash of the first 4096 bytes.
+6. Hash the full content of the files.
+7. Group by the full hash and report duplicates.
+
 # TODO
 
 ## Clean up CLI interface
