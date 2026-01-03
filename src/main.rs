@@ -41,7 +41,7 @@ struct Args {
     min_size: Option<u64>,
 
     /// Walk the directory and report duplication states for each file.
-    #[arg(long)]
+    #[arg(short, long)]
     report_dir: Option<PathBuf>,
 
     /// Add scores to path patterns for cleanup.
