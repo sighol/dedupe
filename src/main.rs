@@ -57,6 +57,10 @@ struct Args {
     #[arg(short, long)]
     score: Vec<String>,
 
+    /// Only show duplication groups that have at least one scored file.
+    #[arg(short, long)]
+    only_show_groups_with_scores: bool,
+
     /// Delete lowest-scoring duplicates.
     #[arg(long)]
     delete: bool,
@@ -74,6 +78,7 @@ fn main() -> anyhow::Result<()> {
     db::setup(&mut conn)?;
 
     let config = Config {
+        filter_only_groups_with_scores: args.only_show_groups_with_scores,
         min_size: args.min_size.unwrap_or(0),
         exclude_regex: args
             .exclude_regex
@@ -179,18 +184,14 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
     duplicate_groups.sort_unstable_by_key(|x| x[0].size);
     let mut to_delete = vec![];
     for duplicate_group in duplicate_groups {
-        let size = duplicate_group[0].size;
+        let file_size = duplicate_group[0].size;
         let hash = duplicate_group[0].hash.clone().unwrap();
-        redundant_size += size * (duplicate_group.len() as i64 - 1);
-        println!(
-            "\nDuplicated file with size {}",
-            humanize_bytes(size as f64).bold().yellow(),
-        );
+        redundant_size += file_size * (duplicate_group.len() as i64 - 1);
         let mut scored_file_records = vec![];
         let mut lowest_score = i64::MAX;
         for file_record in duplicate_group {
             assert!(
-                file_record.size == size && file_record.hash.as_ref() == Some(&hash),
+                file_record.size == file_size && file_record.hash.as_ref() == Some(&hash),
                 "The hash and size must be identical within the group."
             );
             let path_name = file_record.path.display().to_string();
@@ -203,7 +204,14 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
             }
         }
 
-        if scored_file_records.iter().any(|(_, score)| score.is_some()) {
+        let scores_in_group = scored_file_records.iter().any(|(_, score)| score.is_some());
+        if scores_in_group || !config.filter_only_groups_with_scores {
+            println!(
+                "\nDuplicated file with size {}",
+                humanize_bytes(file_size as f64).bold().yellow(),
+            );
+        }
+        if scores_in_group {
             // Can only delete if all files are scored and not all share the same score.
             let has_deletables = {
                 let scored_files = scored_file_records
@@ -241,7 +249,7 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
                     lowest_score_fmt
                 );
             }
-        } else {
+        } else if !config.filter_only_groups_with_scores {
             scored_file_records.sort_by(|(a, _), (b, _)| a.path.cmp(&b.path));
             for (file_record, _) in scored_file_records {
                 println!("  - {}", file_record.path.display());

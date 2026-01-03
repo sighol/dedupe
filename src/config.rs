@@ -7,6 +7,7 @@ pub struct Config {
     pub exclude_regex: Vec<regex::Regex>,
     pub min_size: u64,
     pub scores: Vec<Score>,
+    pub filter_only_groups_with_scores: bool,
 }
 
 impl Config {
