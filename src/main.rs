@@ -64,6 +64,16 @@ struct Args {
     /// Delete lowest-scoring duplicates.
     #[arg(long)]
     delete: bool,
+
+    #[arg(value_enum, long="color", default_value_t=ColorChoice::Always)]
+    color: ColorChoice,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum ColorChoice {
+    Auto,
+    Never,
+    Always,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -71,6 +81,11 @@ fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
     let args = Args::parse();
+    match args.color {
+        ColorChoice::Always => colored::control::set_override(true),
+        ColorChoice::Never => colored::control::set_override(false),
+        _ => {}
+    };
     let mut conn = match args.db_path {
         Some(path) => Connection::open(&path)?,
         None => Connection::open_in_memory()?,
