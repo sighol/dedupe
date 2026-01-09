@@ -2,6 +2,7 @@ use crate::db::FilesTransaction;
 use crate::file_record::FileRecord;
 use crate::humanize_bytes;
 use anyhow::Result;
+use colored::Colorize;
 use rusqlite::Connection;
 use std::cmp::Ordering;
 use std::fs::File;
@@ -34,18 +35,25 @@ pub fn step1(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<Fi
     let mut tx = FilesTransaction::begin(conn)?;
     let mut time = Instant::now();
     for file in to_check_hash {
-        if let Ok(hash) = compute_xxhash_4096(&file.path) {
-            file.hash_4096 = Some(hash.clone());
-            if file.size <= 4096 {
-                file.hash = Some(hash);
+        match compute_xxhash_4096(&file.path) {
+            Ok(hash) => {
+                file.hash_4096 = Some(hash.clone());
+                if file.size <= 4096 {
+                    file.hash = Some(hash);
+                }
+                let num_updated = tx.update(file)?;
+                if num_updated >= 15_000 || time.elapsed() > Duration::from_secs(5) {
+                    log(num_updated);
+                    tx.commit()?;
+                    tx = FilesTransaction::begin(conn)?;
+                    time = Instant::now();
+                }
             }
-            let num_updated = tx.update(file)?;
-            if num_updated >= 15_000 || time.elapsed() > Duration::from_secs(5) {
-                log(num_updated);
-                tx.commit()?;
-                tx = FilesTransaction::begin(conn)?;
-                time = Instant::now();
-            }
+            Err(e) => eprintln!(
+                "Failed to hash '{}': {}",
+                file.path.display().to_string().blue(),
+                e.to_string().red()
+            ),
         }
     }
 
@@ -93,17 +101,24 @@ pub fn step2(conn: &mut Connection, mut files: Vec<FileRecord>) -> Result<Vec<Fi
     let mut bytes = 0;
     let mut time = Instant::now();
     for file in to_check_hash {
-        if let Ok(hash) = compute_xxhash(&file.path) {
-            file.hash = Some(hash);
-            let num_updated = tx.update(file)?;
-            bytes += file.size;
-            if num_updated >= 5_000 || time.elapsed() > Duration::from_secs(5) {
-                log(num_updated, bytes, time.elapsed());
-                tx.commit()?;
-                tx = FilesTransaction::begin(conn)?;
-                time = Instant::now();
-                bytes = 0;
+        match compute_xxhash(&file.path) {
+            Ok(hash) => {
+                file.hash = Some(hash);
+                let num_updated = tx.update(file)?;
+                bytes += file.size;
+                if num_updated >= 5_000 || time.elapsed() > Duration::from_secs(5) {
+                    log(num_updated, bytes, time.elapsed());
+                    tx.commit()?;
+                    tx = FilesTransaction::begin(conn)?;
+                    time = Instant::now();
+                    bytes = 0;
+                }
             }
+            Err(e) => eprintln!(
+                "Failed to hash '{}': {}",
+                file.path.display(),
+                e.to_string().red()
+            ),
         }
     }
 
