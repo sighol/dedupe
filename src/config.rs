@@ -1,13 +1,20 @@
 use anyhow::Context;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DuplicateGroupFilter {
+    All,
+    OnlyGroupsWithScores,
+    OnlyGroupsWithDeletables,
+}
+
 #[derive(Debug)]
 pub struct Config {
     pub includes: Vec<PathBuf>,
     pub exclude_regex: Vec<regex::Regex>,
     pub min_size: u64,
     pub scores: Vec<Score>,
-    pub filter_only_groups_with_scores: bool,
+    pub groups_filter: DuplicateGroupFilter,
 }
 
 impl Config {

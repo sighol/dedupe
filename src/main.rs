@@ -3,7 +3,7 @@ mod db;
 mod file_record;
 mod filter_duplicates;
 
-use crate::config::Score;
+use crate::config::{DuplicateGroupFilter, Score};
 use crate::db::FilesTransaction;
 use crate::filter_duplicates::find_duplicates_by;
 use anyhow::Context;
@@ -58,8 +58,11 @@ struct Args {
     score: Vec<String>,
 
     /// Only show duplication groups that have at least one scored file.
-    #[arg(short, long)]
-    only_show_groups_with_scores: bool,
+    ///
+    /// Specify twice to only show duplication groups containing files that are candidates for
+    /// deletion.
+    #[arg(short, long, action=clap::ArgAction::Count)]
+    only_show_groups_with_scores: u8,
 
     /// Delete lowest-scoring duplicates.
     #[arg(long)]
@@ -93,7 +96,11 @@ fn main() -> anyhow::Result<()> {
     db::setup(&mut conn)?;
 
     let config = Config {
-        filter_only_groups_with_scores: args.only_show_groups_with_scores,
+        groups_filter: match args.only_show_groups_with_scores {
+            0 => DuplicateGroupFilter::All,
+            1 => DuplicateGroupFilter::OnlyGroupsWithScores,
+            _ => DuplicateGroupFilter::OnlyGroupsWithDeletables,
+        },
         min_size: args.min_size.unwrap_or(0),
         exclude_regex: args
             .exclude_regex
@@ -145,7 +152,7 @@ fn add_folder(
     for file in db::fetch(conn, path) {
         map.insert(file.path.display().to_string(), file);
     }
-    if map.len() > 0 {
+    if !map.is_empty() {
         info!(
             "Found {} files in the db cache starting at path {}",
             map.len(),
@@ -220,25 +227,34 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
         }
 
         let scores_in_group = scored_file_records.iter().any(|(_, score)| score.is_some());
-        if scores_in_group || !config.filter_only_groups_with_scores {
-            println!(
-                "\nDuplicated file with size {}",
-                humanize_bytes(file_size as f64).bold().yellow(),
-            );
+        let has_deletables = {
+            let scored_files = scored_file_records
+                .iter()
+                .filter(|(_, score)| score.is_some())
+                .count();
+            let files_with_lowest_score = scored_file_records
+                .iter()
+                .filter(|(_, score)| *score == Some(lowest_score))
+                .count();
+            scored_files == scored_file_records.len() && files_with_lowest_score != scored_files
+        };
+
+        let should_show = match config.groups_filter {
+            DuplicateGroupFilter::All => true,
+            DuplicateGroupFilter::OnlyGroupsWithScores => scores_in_group,
+            DuplicateGroupFilter::OnlyGroupsWithDeletables => has_deletables,
+        };
+        if !should_show {
+            continue;
         }
+
+        let header = format!(
+            "\nDuplicated file with size {}",
+            humanize_bytes(file_size as f64).bold().yellow(),
+        );
+
         if scores_in_group {
-            // Can only delete if all files are scored and not all share the same score.
-            let has_deletables = {
-                let scored_files = scored_file_records
-                    .iter()
-                    .filter(|(_, score)| score.is_some())
-                    .count();
-                let files_with_lowest_score = scored_file_records
-                    .iter()
-                    .filter(|(_, score)| *score == Some(lowest_score))
-                    .count();
-                scored_files == scored_file_records.len() && files_with_lowest_score != scored_files
-            };
+            println!("{}", header);
             scored_file_records.sort_by_key(|(_, score)| score.unwrap_or(i64::MAX));
             scored_file_records.reverse();
             for (file_record, score) in scored_file_records {
@@ -264,8 +280,9 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
                     lowest_score_fmt
                 );
             }
-        } else if !config.filter_only_groups_with_scores {
+        } else {
             scored_file_records.sort_by(|(a, _), (b, _)| a.path.cmp(&b.path));
+            println!("{}", header);
             for (file_record, _) in scored_file_records {
                 println!("  - {}", file_record.path.display());
             }
