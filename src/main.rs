@@ -370,15 +370,11 @@ fn report_duplication_status_in_dir(
             .expect("File was found in report_dir")
             .display()
             .to_string();
-        let file_record = &files_by_path
-            .get(&path.display().to_string())
-            .unwrap_or_else(|| panic!("Did not find {path:?} in db"));
-        if file_record.size < config.min_size as i64 {
-            ignored_files += 1;
-            continue;
-        }
+
+        let file_record = &files_by_path.get(&path.display().to_string());
+        let file_record_hash = file_record.and_then(|x| x.hash.clone());
         print!("{}: ", path_name.blue());
-        if let Some(hash) = &file_record.hash {
+        if let Some(hash) = &file_record_hash {
             let other_files: Vec<_> = match files_by_hash.get(hash) {
                 Some(vec) => vec
                     .iter()
@@ -395,7 +391,7 @@ fn report_duplication_status_in_dir(
             println!(
                 "{} other copies. File size: {}.",
                 other_files.len().to_string().yellow().bold(),
-                humanize_bytes(file_record.size as f64).yellow().bold(),
+                humanize_bytes(size as f64).yellow().bold(),
             );
             for f in other_files {
                 println!("  - {}", f.path.display());
