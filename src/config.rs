@@ -1,4 +1,3 @@
-use anyhow::Context;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,17 +60,20 @@ pub struct Score {
 impl Score {
     pub fn parse(s: &str) -> anyhow::Result<Self> {
         let Some((score, regex)) = s.split_once('=') else {
-            anyhow::bail!("Does does not contain =");
+            anyhow::bail!("Score '{}' does does not contain '='", s);
         };
 
         let score: i64 = match score.parse() {
             Ok(score) => score,
-            e => e.context("Score is not a number")?,
+            _ => anyhow::bail!(format!(
+                "Score '{}' has prefix '{}' which is not a number",
+                s, score
+            )),
         };
 
         let pattern = match regex::Regex::new(regex) {
             Ok(r) => r,
-            e => e.context("Bad regex")?,
+            Err(e) => anyhow::bail!(format!("Score '{}' contains bad regex: {}", s, e)),
         };
 
         Ok(Self { score, pattern })

@@ -6,7 +6,6 @@ mod filter_duplicates;
 use crate::config::{DuplicateGroupFilter, Score};
 use crate::db::FilesTransaction;
 use crate::filter_duplicates::find_duplicates_by;
-use anyhow::Context;
 use clap::Parser;
 use colored::Colorize;
 use config::Config;
@@ -89,6 +88,19 @@ fn main() -> anyhow::Result<()> {
         ColorChoice::Never => colored::control::set_override(false),
         _ => {}
     };
+    if let Some(report_dir) = &args.report_dir {
+        match report_dir.canonicalize() {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!(
+                    "Failed to read report dir '{}': {}",
+                    report_dir.display().to_string().blue(),
+                    e
+                );
+                std::process::exit(1);
+            }
+        }
+    }
     let mut conn = match args.db_path {
         Some(path) => Connection::open(&path)?,
         None => Connection::open_in_memory()?,
@@ -105,21 +117,36 @@ fn main() -> anyhow::Result<()> {
         exclude_regex: args
             .exclude_regex
             .iter()
-            .map(|x| regex::Regex::new(x).expect("Valid regex pattern"))
+            .map(|x| {
+                regex::Regex::new(x).unwrap_or_else(|e| {
+                    eprintln!("Invalid regex pattern: {}", e);
+                    std::process::exit(1);
+                })
+            })
             .collect(),
         includes: args
             .folders
             .iter()
             .map(|x| {
-                x.canonicalize()
-                    .context(format!("Could not find file {x:?}"))
+                x.canonicalize().unwrap_or_else(|e| {
+                    eprintln!(
+                        "Failed to read directory '{}': {}",
+                        x.display().to_string().blue(),
+                        e
+                    );
+                    std::process::exit(1);
+                })
             })
-            .collect::<Result<Vec<PathBuf>, anyhow::Error>>()
-            .unwrap(),
+            .collect::<Vec<PathBuf>>(),
         scores: args
             .score
             .iter()
-            .map(|x| Score::parse(x).expect("Bad score"))
+            .map(|x| {
+                Score::parse(x).unwrap_or_else(|e| {
+                    eprintln!("Could not parse score: {}", e);
+                    std::process::exit(1);
+                })
+            })
             .collect(),
     };
 
