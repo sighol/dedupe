@@ -202,13 +202,12 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
 
     let mut redundant_size = 0;
     let mut duplicate_groups = find_duplicates_by(|a, b| a.hash.cmp(&b.hash), files);
-    let num_duplicate_groups = duplicate_groups.len();
+    let mut num_duplicate_groups = 0;
     duplicate_groups.sort_unstable_by_key(|x| x[0].size);
     let mut to_delete = vec![];
     for duplicate_group in duplicate_groups {
         let file_size = duplicate_group[0].size;
         let hash = duplicate_group[0].hash.clone().unwrap();
-        redundant_size += file_size * (duplicate_group.len() as i64 - 1);
         let mut scored_file_records = vec![];
         let mut lowest_score = i64::MAX;
         for file_record in duplicate_group {
@@ -248,6 +247,8 @@ fn report_all_duplicated_files(config: &Config, files: Vec<FileRecord>, delete: 
             continue;
         }
 
+        redundant_size += file_size * (scored_file_records.len() as i64 - 1);
+        num_duplicate_groups += 1;
         let header = format!(
             "\nDuplicated file with size {}",
             humanize_bytes(file_size as f64).bold().yellow(),
