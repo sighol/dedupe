@@ -35,6 +35,10 @@ struct Args {
     #[arg(short = 'e', long)]
     exclude_regex: Vec<String>,
 
+    /// Only include files where the regex matches any part of the full file path.
+    #[arg(short = 'i', long)]
+    include_regex: Option<String>,
+
     /// Exclude files smaller than this file size in bytes.
     #[arg(short, long)]
     min_size: Option<u64>,
@@ -124,7 +128,13 @@ fn main() -> anyhow::Result<()> {
                 })
             })
             .collect(),
-        includes: args
+        include_regex: args.include_regex.map(|x| {
+            regex::Regex::new(&x).unwrap_or_else(|e| {
+                eprintln!("Invalid regex pattefrn: {}", e);
+                std::process::exit(1);
+            })
+        }),
+        folders: args
             .folders
             .iter()
             .map(|x| {
@@ -151,7 +161,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut files = vec![];
-    for dir in config.includes.iter() {
+    for dir in config.folders.iter() {
         for f in add_folder(&mut conn, &config, dir).expect("Failed to add folder") {
             files.push(f);
         }

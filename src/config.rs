@@ -9,8 +9,9 @@ pub enum DuplicateGroupFilter {
 
 #[derive(Debug)]
 pub struct Config {
-    pub includes: Vec<PathBuf>,
+    pub folders: Vec<PathBuf>,
     pub exclude_regex: Vec<regex::Regex>,
+    pub include_regex: Option<regex::Regex>,
     pub min_size: u64,
     pub scores: Vec<Score>,
     pub groups_filter: DuplicateGroupFilter,
@@ -21,19 +22,15 @@ impl Config {
         if path.is_symlink() {
             return false;
         }
-        let mut is_included = false;
-        for inc in self.includes.iter() {
-            if path.starts_with(inc) {
-                is_included = true;
-                break;
-            }
-        }
-        if !is_included {
-            return false;
-        }
 
         for regex in self.exclude_regex.iter() {
             if path.to_str().is_some_and(|s| regex.is_match(s)) {
+                return false;
+            }
+        }
+
+        if let Some(regex) = &self.include_regex {
+            if !path.to_str().is_some_and(|s| regex.is_match(s)) {
                 return false;
             }
         }
