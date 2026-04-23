@@ -130,7 +130,7 @@ fn main() -> anyhow::Result<()> {
             .collect(),
         include_regex: args.include_regex.map(|x| {
             regex::Regex::new(&x).unwrap_or_else(|e| {
-                eprintln!("Invalid regex pattefrn: {}", e);
+                eprintln!("Invalid regex pattern: {}", e);
                 std::process::exit(1);
             })
         }),
